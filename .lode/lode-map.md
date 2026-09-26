@@ -20,6 +20,7 @@ flowchart TD
     root --> plans[plans/]
     root --> tmp[tmp/ — git-ignored]
     plans --> rm[mvp-roadmap.md]
+    plans --> rt[required-tests.md]
     plans --> oq[open-questions.md]
     plans --> oos[out-of-scope.md]
     plans --> d[design/]
@@ -84,7 +85,8 @@ trade-off.
 
 | File | Contents |
 | --- | --- |
-| [plans/mvp-roadmap.md](plans/mvp-roadmap.md) | The phases, which are done, the required security and functional test lists, the definition of done. |
+| [plans/mvp-roadmap.md](plans/mvp-roadmap.md) | The phases, which are done, what each remaining one builds, the definition of done. |
+| [plans/required-tests.md](plans/required-tests.md) | The mandatory test lists: hard boundaries, startup, structured writes, idempotency, raw writes, functional. |
 | [plans/open-questions.md](plans/open-questions.md) | The NativeAOT pair, MCP Tasks for `backup`, and the remaining verification tasks. |
 | [plans/out-of-scope.md](plans/out-of-scope.md) | Excluded features and the reason for each exclusion. |
 
@@ -117,11 +119,12 @@ documents go here.
 | --- | --- |
 | Start a session | `lode-map.md`, `terminology.md`, `summary.md` |
 | Continue implementation | `plans/mvp-roadmap.md`, `practices.md` |
-| Write or run a test | `testing/e2e-harness.md` |
+| Write or run a test | `testing/e2e-harness.md`, `plans/required-tests.md` |
 | Touch SQLite access | `database/connections.md`, `plans/design/sqlite-sandbox.md`, `plans/design/connection-policy.md` |
 | Add or change a tool | `mcp/tool-catalog.md`, `security/permissions.md` |
 | Touch authentication | `security/authentication.md`, `security/permissions.md` |
 | Touch configuration | `configuration/options.md` |
 | Touch a write path | `plans/design/structured-writes.md`, `plans/design/write-idempotency.md`, `plans/design/raw-writes.md` |
 | Write documentation | `plans/design/security-model.md`, `security/permissions.md`, `plans/design/raw-writes.md`, `decisions/` |
+| Touch the container or the launch configuration | `plans/design/container-and-deployment.md`, `testing/e2e-harness.md` |
 | Consider a new feature | `plans/out-of-scope.md`, `decisions/` |

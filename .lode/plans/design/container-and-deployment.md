@@ -117,6 +117,44 @@ The base image choice depends on the NativeAOT result. See
 The Dockerfile build context is the solution `src` directory, not the repository root. Remember
 this when you add a file to the build.
 
+## Container launch configuration
+
+`src/Xakpc.SQLiteMCPSidecar/Properties/launchSettings.json` has **no** container profile. The
+template one is gone, because it could not start the sidecar: it mounted no database, it set no
+`SQLITE_SIDECAR_` variable, and it opened an HTTPS port that this product does not use. The project
+profiles are current state in [../../testing/e2e-harness.md](../../testing/e2e-harness.md).
+
+Phase 7 adds the container launch configuration back. It needs these parts:
+
+```text
+compose.yaml at the repository root, for a local run and for the e2e suite
+a container launch profile, for F5 into the container
+```
+
+Requirements for both:
+
+- Mount `build/dev/` at `/data`, **writable**. A read-only deployment still needs write access for the `-wal` and `-shm` files.
+- Mount a writable backups directory when the profile carries the `backup` permission.
+- Set `SQLITE_SIDECAR_DB=/data/app.db`, `SQLITE_SIDECAR_TOKEN`, `SQLITE_SIDECAR_PERMISSIONS` and `ASPNETCORE_URLS=http://0.0.0.0:8080`.
+- Publish port 8080 only. Do not set `ASPNETCORE_HTTPS_PORTS` and do not set `useSSL`.
+- Keep `danger-raw-write` out of the compose example. It must be an explicit operator decision, and an example that an operator can copy without thought is the wrong place for it.
+- Run `scripts/seed-dev-db.ps1` first, because the sidecar never creates the database.
+
+The local run must answer on the same port and token as the project profiles, thus
+`src/Xakpc.SQLiteMCPSidecar/mcp.http` reaches the container with no change.
+
+**Why this matters more than developer comfort.** The SQLite sandbox depends on the native SQLite
+build, thus a Windows developer run does not prove the shipped behaviour. The container is the only
+target that does. `SidecarHarness` already reads `SIDECAR_E2E_URL`, `SIDECAR_E2E_TOKEN` and
+`SIDECAR_E2E_PERMISSIONS`, thus the whole suite runs against the container with no test change:
+
+```powershell
+$env:SIDECAR_E2E_URL = 'http://localhost:8080'
+$env:SIDECAR_E2E_TOKEN = 'dev-token'
+$env:SIDECAR_E2E_PERMISSIONS = 'schema,read'
+dotnet test --solution Xakpc.SQLiteMCPSidecar.slnx
+```
+
 ## Build output
 
 `Directory.Build.props` sends build output to:

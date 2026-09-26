@@ -44,7 +44,7 @@ Current state: [../configuration/options.md](../configuration/options.md),
 
 A wrong token returns `401`, an absent token or database fails startup, and a write permission
 without the read floor fails startup with a message that names the missing permission. The startup
-test list below runs in `StartupTests`.
+case list in [required-tests.md](required-tests.md) runs in `StartupTests`.
 
 The phase also landed the MCP endpoint, the `schema` tool and the test harness. See
 [../mcp/tool-catalog.md](../mcp/tool-catalog.md) and
@@ -60,8 +60,8 @@ This is the foundation phase. See [design/sqlite-sandbox.md](design/sqlite-sandb
 - The read-write connection factory. The read-only one exists: see [../database/connections.md](../database/connections.md) and [design/connection-policy.md](design/connection-policy.md).
 - The write semaphore and the backup semaphore. The request semaphore exists.
 
-Done when: each item of the hard-boundary test list below fails remotely, with no tool
-registered except a test harness.
+Done when: each statement of the hard-boundary list in [required-tests.md](required-tests.md) fails
+remotely, with no tool registered except a test harness.
 
 ### Phase 3 — query and TOON
 
@@ -113,118 +113,28 @@ boundary still fails.
 ### Phase 7 — container and documentation
 
 - Rework the Dockerfile. See [design/container-and-deployment.md](design/container-and-deployment.md).
+- Add the container launch configuration back: a `compose.yaml` and a container launch profile. The template profile is gone, because it mounts no database and it opens an HTTPS port. See [design/container-and-deployment.md](design/container-and-deployment.md).
+- Point the e2e suite at the container and add that run to CI. This satisfies the rule that the functional suite runs against the published Linux artifact. See [../testing/e2e-harness.md](../testing/e2e-harness.md).
 - `README.md` with the permission risk table, the whole-database write statement and the one-sidecar rule.
 - `SECURITY.md` with the required `danger-raw-write` statement, the no-undo statement and the budget-throttle statement.
 - `LICENSE`, Apache-2.0.
+
+Done when: the image runs as non-root over a mounted database, `docker compose up` gives a working
+sidecar, and `SIDECAR_E2E_URL` pointed at it passes the whole suite.
 
 ### Phase 8 — NativeAOT
 
 - Attempt `PublishAot=true`. See [open-questions.md](open-questions.md).
 - Fall back to a self-contained .NET 10 Linux image if the cost is too high.
 
-## Required security tests
+## Required tests
 
-These are mandatory. Each statement must fail remotely, **also** with `danger-raw-write`.
+The mandatory lists live in [required-tests.md](required-tests.md): the hard-boundary statements, the
+startup cases, the structured write cases, the idempotency cases, the raw write cases and the
+functional cases. Security tests are mandatory, not optional.
 
-```sql
-ATTACH DATABASE '/tmp/x.db' AS x;
-DETACH DATABASE x;
-
-CREATE TABLE hacked(id);
-DROP TABLE jobs;
-
-PRAGMA writable_schema = ON;
-PRAGMA journal_mode = OFF;
-
-SELECT load_extension('/tmp/malicious.so');
-
-VACUUM INTO '/tmp/copy.db';
-```
-
-Startup tests. These run in `StartupTests`, and the list is complete:
-
-```text
-permissions=write                    -> startup fails, the message names schema and read
-permissions=danger-raw-write         -> startup fails
-permissions=reed                     -> startup fails
-non-WAL database + write permission  -> starts, logs the warning
-```
-
-Structured write tests:
-
-```text
-UPDATE without WHERE            -> InvalidWrite
-DELETE without WHERE            -> InvalidWrite
-write without requestId         -> InvalidWrite
-broad filter, pre-count fails   -> WriteLimitExceeded, no rows written
-over maxRows after execution    -> rollback, WriteLimitExceeded
-many small writes over budget   -> WriteBudgetExceeded
-```
-
-Idempotency tests:
-
-```text
-same requestId twice            -> one write, the same response two times
-same requestId, new payload     -> InvalidWrite
-requestId after DatabaseBusy    -> the retry executes
-requestId over 128 characters   -> InvalidWrite
-```
-
-Raw write tests:
-
-```text
-raw INSERT succeeds with danger-raw-write
-raw UPDATE succeeds with danger-raw-write
-raw DELETE succeeds with danger-raw-write
-
-raw write rejected without danger-raw-write
-raw write without requestId rejected
-raw write rows count toward the budget
-
-raw DROP rejected
-raw ATTACH rejected
-raw PRAGMA mutation rejected
-raw transaction control rejected
-```
-
-## Required functional tests
-
-```text
-schema discovery returns usable DDL
-TOON query output
-read while the application writes
-
-structured insert
-structured update
-structured delete
-rollback after a structured maxRows violation
-
-raw INSERT
-raw UPDATE
-raw DELETE
-raw UPDATE RETURNING
-
-backup returns before the copy completes
-backup_status reports success
-backup_status reports failure
-a second backup during a backup -> BackupFailed
-a stopped backup leaves only a partial file
-startup deletes a stale partial file
-
-read-only deployment
-structured-write deployment
-danger-raw-write deployment
-
-WAL database
-rollback-journal database
-
-SQLITE_BUSY behavior
-query timeout
-concurrency limiting
-```
-
-Run the functional suite against the published Linux artifact. The sandbox depends on the
-native SQLite build, thus a Windows developer run does not prove the shipped behavior.
+The startup list is complete and it runs in `StartupTests`. Each remaining list belongs to the phase
+that builds its feature.
 
 ## Definition of done
 
@@ -239,6 +149,7 @@ handling and container isolation.
 
 ## Related
 
+- [required-tests.md](required-tests.md) — the mandatory test lists
 - [design/](design/) — the target design for each topic
 - [out-of-scope.md](out-of-scope.md)
 - [open-questions.md](open-questions.md)

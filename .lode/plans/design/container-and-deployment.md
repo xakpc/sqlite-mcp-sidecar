@@ -21,6 +21,10 @@ flowchart TD
 Both containers mount the same local volume. The database file must stay on a local
 filesystem. See [connection-policy.md](connection-policy.md).
 
+**Invariant.** One sidecar process serves one database. The write budget and the idempotency
+cache are in process memory, thus a second replica makes both guarantees weaker without an
+error message. Do not scale the sidecar service. Nothing in the code enforces this rule.
+
 ## Compose example
 
 ```yaml
@@ -33,6 +37,8 @@ services:
 
   sqlite-sidecar:
     image: ghcr.io/example/sqlite-sidecar-mcp:latest
+    deploy:
+      replicas: 1
     environment:
       SQLITE_SIDECAR_DB: /data/app.db
       SQLITE_SIDECAR_TOKEN: ${SQLITE_SIDECAR_TOKEN}
@@ -53,6 +59,27 @@ volumes:
 `danger-raw-write` must be an explicit operator decision. Do not put it in an example that an
 operator can copy without thought.
 
+## Filesystem access
+
+| Path | Access |
+| --- | --- |
+| root filesystem | read-only |
+| `/data` | read and write, also for a read-only deployment |
+| `/backups` | writable when the `backup` permission is on |
+| `SQLITE_TMPDIR` | small writable `tmpfs` |
+
+**A read-only deployment still needs write access to `/data`.** SQLite opens the `-shm`
+shared-memory file read-write also for a read-only connection to a WAL database. A directory
+that is mounted read-only therefore fails on a WAL database, and the failure looks like a
+permission problem and not like a configuration problem. Mount `/data` writable and use the
+`read` permission set to limit the sidecar.
+
+A read-only root filesystem needs a writable temporary directory. SQLite can need scratch
+space for a large sort or a spill. Mount a small `tmpfs` and point `SQLITE_TMPDIR` at it.
+
+The process deletes stale `*.db.partial` files in the backup directory at startup. A file with
+that suffix is an incomplete backup from a process that stopped. See [backups.md](backups.md).
+
 ## Image requirements
 
 The official image must:
@@ -72,35 +99,27 @@ Recommended runtime flags:
 --security-opt=no-new-privileges
 ```
 
-Ideal filesystem layout:
-
-| Path | Access |
-| --- | --- |
-| root filesystem | read-only |
-| `/data` | database access |
-| `/backups` | writable only when the `backup` permission is on |
-
-A read-only root filesystem needs a writable temporary directory. SQLite may need scratch
-space for a large sort or a spill, so mount a small `tmpfs` and point `SQLITE_TMPDIR` at it.
-
 ## Current Dockerfile
 
-`src/Xakpc.SQLiteMCPSidecar/Dockerfile` is the Visual Studio template. It has multiple stages
-and it already sets `USER $APP_UID`, so it does not run as root.
+`src/Xakpc.SQLiteMCPSidecar/Dockerfile` is the Visual Studio template. It has several stages
+and it sets `USER $APP_UID` already, thus it does not run as root.
 
-Changes that the target requires:
+Changes that the target needs:
 
-- Remove the HTTPS port. The reverse proxy terminates TLS, so `EXPOSE 8081` is unnecessary.
-- Switch the final stage to a minimal base. The `aspnet` image carries more than the sidecar needs.
-- Confirm that the final stage contains no SDK layer.
+- Remove the HTTPS port. The reverse proxy terminates TLS, thus `EXPOSE 8081` is unnecessary.
+- Change the final stage to a minimal base. The `aspnet` image has more than the sidecar needs.
+- Make sure that the final stage has no SDK layer.
 - Add `SQLITE_TMPDIR` when the root filesystem is read-only.
 
-The Dockerfile build context is the solution `src` directory, not the repository root. Keep
-that in mind when adding a file to the build.
+The base image choice depends on the NativeAOT result. See
+[../open-questions.md](../open-questions.md).
+
+The Dockerfile build context is the solution `src` directory, not the repository root. Remember
+this when you add a file to the build.
 
 ## Build output
 
-`Directory.Build.props` redirects build output:
+`Directory.Build.props` sends build output to:
 
 ```text
 build/bin/<project>/
@@ -108,8 +127,8 @@ build/obj/<project>/
 ```
 
 The `.dockerignore` file excludes `**/bin` and `**/obj`. It does not exclude `build/`. The
-repository-root `build/` directory is outside the current `src` build context, so it does not
-affect the image today. Add `build/` to `.dockerignore` if the context ever moves to the
+repository-root `build/` directory is outside the current `src` build context, thus it has no
+effect on the image today. Add `build/` to `.dockerignore` if the context moves to the
 repository root.
 
 ## Related

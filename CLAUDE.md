@@ -81,3 +81,17 @@ if the .lode/ does not exist, ask the user if you should create one.
 when creating use to build best practicies
 - https://raw.githubusercontent.com/github/awesome-copilot/refs/heads/main/skills/dotnet-mcp-builder/SKILL.md
 - 
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as local markdown files under `.scratch/<feature>/` in this repo. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. The domain docs are the Lode: the glossary is `.lode/terminology.md` and decisions live in `.lode/decisions/`. See `docs/agents/domain.md`.

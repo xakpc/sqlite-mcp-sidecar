@@ -13,6 +13,7 @@ multiple tokens
 RBAC
 per-table ACLs
 per-column ACLs
+deployment-level table allowlist
 
 OAuth / OIDC
 mTLS
@@ -24,6 +25,7 @@ browser UI
 DDL
 
 restore
+automatic backup before delete
 scheduled backups
 backup retention
 cloud backup upload
@@ -45,37 +47,48 @@ generic database abstractions
 
 ## Why each group is out
 
-**More databases, users, roles and ACLs.** The MVP has one authentication identity, so an
-internal permission model would have nothing to attach to. A separate trust boundary uses a
-separate deployment, which keeps the boundary visible in deployment configuration. See
+**More databases, users, roles and ACLs.** The MVP has one authentication identity, thus an
+internal permission model has nothing to attach to. A separate trust boundary uses a separate
+deployment, which keeps the boundary visible in the deployment configuration. See
 [design/permission-model.md](design/permission-model.md).
 
-**OAuth, OIDC and mTLS.** The reverse proxy owns transport identity. A single bearer token
-matches the one-identity model. See
+**Deployment-level table allowlist.** This one is not an ACL, and the identity argument above
+does not apply to it. We excluded it for cost control only. A permission therefore applies to
+each table in the database. See
+[../decisions/0002-write-is-a-whole-database-grant.md](../decisions/0002-write-is-a-whole-database-grant.md).
+
+**OAuth, OIDC and mTLS.** The reverse proxy owns transport identity. One bearer token agrees
+with the one-identity model. See
 [design/authentication-and-network.md](design/authentication-and-network.md).
 
-**REST API, CLI and browser UI.** The product has one MCP endpoint. A second surface doubles
-the security review area for no product gain. CORS is off, and browser access is not a goal.
+**REST API, CLI and browser UI.** The product has one MCP endpoint. A second surface makes the
+security review area two times larger for no product gain. CORS is off, and browser access is
+not a goal.
 
-**DDL.** Schema change is the owning application's responsibility. A sidecar that alters the
-schema can break that application, and DDL is a hard boundary in the sandbox. See
+**DDL.** Schema change is the responsibility of the owning application. A sidecar that changes
+the schema can break that application, and DDL is a hard boundary in the sandbox. See
 [design/sqlite-sandbox.md](design/sqlite-sandbox.md).
 
-**Restore, scheduled backups, retention and upload.** Restore is an operator action on the
-host. A restore tool would let a remote caller replace the live database, which is a larger
-blast radius than every other tool combined.
+**Restore, automatic backup before delete, retention and upload.** Restore is an operator
+action on the host. A restore tool permits a remote caller to replace the live database, which
+is a larger blast radius than each other tool together. The automatic backup before a delete
+was in an earlier design, and we removed it. See
+[../decisions/0001-no-undo-in-mvp.md](../decisions/0001-no-undo-in-mvp.md).
 
-**Remote transaction sessions.** The MCP HTTP transport is stateless, and a cross-call
-transaction would let one caller hold a write lock against the owning application for an
-unbounded time. See [design/raw-writes.md](design/raw-writes.md).
+**Scheduled backups.** The product has no scheduler. An operator schedules a `backup` call, or
+uses a host tool.
+
+**Remote transaction sessions.** The MCP HTTP transport is stateless, and a transaction across
+calls permits one caller to hold a write lock against the owning application for an unbounded
+time. See [design/raw-writes.md](design/raw-writes.md).
 
 **Replication and clustering.** SQLite is a local file database. This is not the product.
 
-**Custom SQLite builds and a custom TOON serializer.** Both are large maintenance costs. Use
-the bundled native SQLite and the `Toon.DotNet` package. Revisit only with a concrete,
-recorded reason.
+**Custom SQLite builds and a custom TOON serializer.** Both have a large maintenance cost. Use
+the bundled native SQLite and the `Toon.DotNet` package. Examine this again only with a
+concrete, recorded reason.
 
-**Prometheus and OpenTelemetry.** Structured ASP.NET Core logs are enough for the MVP. See
+**Prometheus and OpenTelemetry.** Structured ASP.NET Core logs are sufficient for the MVP. See
 [design/threat-model.md](design/threat-model.md) for the logging constraints.
 
 **Plugin architecture and generic database abstractions.** Speculative extensibility. The
@@ -85,3 +98,4 @@ project follows YAGNI. See [../practices.md](../practices.md).
 
 - [mvp-roadmap.md](mvp-roadmap.md)
 - [../practices.md](../practices.md)
+- [../decisions/](../decisions/)

@@ -3,20 +3,26 @@
 > **Status: planned.** This file records target design. No code implements it yet.
 > Current state is in [../../summary.md](../../summary.md). Sequence is in [../mvp-roadmap.md](../mvp-roadmap.md).
 
-The `danger-raw-write` permission exposes one tool, `execute_write_sql`. It accepts a
+The `danger-raw-write` permission gives one tool, `execute_write_sql`. It accepts a
 caller-supplied DML statement. Some operators need normal SQL write semantics, and this
 permission separates that need from the agent-safe structured interface.
 
+**Read floor.** `danger-raw-write` is only valid together with `schema` and `read`. See
+[permission-model.md](permission-model.md).
+
 ## `execute_write_sql`
+
+The `requestId` value is mandatory. See [write-idempotency.md](write-idempotency.md).
 
 ```json
 {
+  "requestId": "a3f1c5",
   "sql": "UPDATE jobs SET retry = retry + 1 WHERE status = $status",
   "parameters": { "$status": "failed" }
 }
 ```
 
-Allowed statement categories:
+Permitted statement categories:
 
 ```text
 INSERT
@@ -33,18 +39,18 @@ CTEs, `RETURNING`, subqueries, expressions and conflict clauses.
 the structured filter model
 the mandatory structured WHERE
 the caller maxRows requirement
+the bounded pre-count
 server-generated SQL
 ```
 
-Therefore this statement is valid:
+This statement is therefore valid:
 
 ```sql
 DELETE FROM jobs;
 ```
 
-This is intentional. An operator that enables `danger-raw-write` explicitly chooses standard
-raw SQLite DML semantics. Do not add a partial safety net that makes the behavior hard to
-predict.
+This is intentional. An operator that enables `danger-raw-write` selects standard raw SQLite
+DML semantics. Do not add a partial safety net that makes the behavior difficult to predict.
 
 ## What the permission does not bypass
 
@@ -52,19 +58,21 @@ The SQLite sandbox stays intact.
 
 ```mermaid
 flowchart TD
-    raw[execute_write_sql] --> ok[Bypasses agent protections]
+    raw[execute_write_sql] --> ok[Bypasses the agent protections]
     raw --> no[Does not bypass the SQLite sandbox]
     no --> a[Authorizer]
     no --> b[Defensive mode]
     no --> c[Runtime limits]
     no --> d[Timeout and interrupt]
-    no --> e[One statement per request]
+    no --> e[One statement for each request]
     no --> f[Authentication and permissions]
     no --> g[SQL size limit]
     no --> h[Busy timeout and write serialization]
+    no --> i[Idempotency key]
+    no --> j[Write budget]
 ```
 
-Always rejected, including with `danger-raw-write`:
+Always rejected, also with `danger-raw-write`:
 
 ```text
 ATTACH, DETACH
@@ -77,10 +85,10 @@ transaction-control statements
 
 ```text
 danger-raw-write  !=  unrestricted SQLite
-danger-raw-write  ==  raw INSERT / UPDATE / DELETE inside the sandbox
+danger-raw-write  ==  raw INSERT / UPDATE / DELETE in the sandbox
 ```
 
-The permission allows arbitrary data manipulation. It does not allow SQLite administration
+The permission permits arbitrary data manipulation. It does not permit SQLite administration
 or filesystem access. Detail is in [sqlite-sandbox.md](sqlite-sandbox.md).
 
 ## Results
@@ -108,6 +116,8 @@ The TOON result obeys the same row limit and byte limit as `query`. See
 ## Limits that still apply
 
 ```text
+mandatory requestId
+write budget
 SQL size limit
 query timeout
 SQLite runtime limits
@@ -118,18 +128,23 @@ deployment permissions
 SQLite authorizer
 ```
 
-The structured `maxRows` guarantee does not apply. Say this explicitly in `SECURITY.md`.
+The structured `maxRows` guarantee does not apply. State this in `SECURITY.md`.
 
 ## Write budget accounting
 
-Document the write-rate budget as a structured-write control. Raw writes also count toward
-the global budget when the accounting stays simple, because SQLite reports the affected row
-count after execution. Prefer to count them. An open point is in
-[../open-questions.md](../open-questions.md).
+Raw writes count toward the write budget. SQLite reports the affected row count after
+execution, thus the sidecar adds that count when the transaction commits.
 
-## One statement per request
+**Invariant.** For a raw write, the budget throttles the next operation. It does not prevent
+the current one, because the row count is not available before execution.
 
-`execute_write_sql` accepts exactly one statement. A multi-statement request is
+There is one counter for structured writes and raw writes. One counter is easier to explain
+than two regimes, and the budget is a resource control on the database. `SECURITY.md` must
+state the throttle behavior in these words.
+
+## One statement for each request
+
+`execute_write_sql` accepts exactly one statement. A request with more than one statement is
 `InvalidQuery`.
 
 ```sql
@@ -139,11 +154,11 @@ UPDATE jobs SET retry = 1; DELETE FROM logs;
 
 ## No remote transaction sessions
 
-The MVP does not support `BEGIN` and `COMMIT` across MCP calls. Every operation is
+The MVP does not support `BEGIN` and `COMMIT` across MCP calls. Each operation is
 self-contained. Raw transaction-control SQL is rejected.
 
-This matches the stateless MCP HTTP transport. A cross-call transaction would need server
-session state, and it would let one caller hold a write lock against the owning application
+This agrees with the stateless MCP HTTP transport. A transaction across calls needs server
+session state, and it permits one caller to hold a write lock against the owning application
 for an unbounded time.
 
 ## Documentation requirement
@@ -157,5 +172,6 @@ for an unbounded time.
 ## Related
 
 - [structured-writes.md](structured-writes.md)
+- [write-idempotency.md](write-idempotency.md)
 - [sqlite-sandbox.md](sqlite-sandbox.md)
 - [permission-model.md](permission-model.md)

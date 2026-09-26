@@ -4,12 +4,12 @@
 > Current state is in [../../summary.md](../../summary.md). Sequence is in [../mvp-roadmap.md](../mvp-roadmap.md).
 
 The sidecar is a security boundary between an AI agent and a live application database. It
-defends against two different callers: an unauthorized client, and an authorized client
-that makes a mistake. The second caller is the unusual part of this product.
+defends against two different callers: an unauthorized client, and an authorized client that
+makes a mistake. The second caller is the unusual part of this product.
 
 ## Layers
 
-Each request passes every layer in order. A layer never becomes optional.
+Each request passes each layer in order. A layer never becomes optional.
 
 ```mermaid
 flowchart TD
@@ -26,13 +26,14 @@ flowchart TD
     sandbox -->|fail| e4[QueryRejected]
 ```
 
-- **Bearer token** — one token per deployment. See [authentication-and-network.md](authentication-and-network.md).
+- **Bearer token** — one token for each deployment. See [authentication-and-network.md](authentication-and-network.md).
 - **Permissions** — they decide which tools exist. See [permission-model.md](permission-model.md).
-- **Agent protections** — structured writes, mandatory predicate, mandatory `maxRows`, server row limit, write budget, optional backup before delete. See [./structured-writes.md](./structured-writes.md).
+- **Agent protections** — structured writes, mandatory predicate, mandatory `maxRows`, bounded pre-count, row-limit rollback, server row limit, write budget, mandatory idempotency key. See [structured-writes.md](structured-writes.md).
 - **SQLite sandbox** — authorizer, defensive mode, runtime limits, interrupt. See [sqlite-sandbox.md](sqlite-sandbox.md).
 
-The agent protections layer is the only layer that `danger-raw-write` weakens. The sandbox
-layer stays intact. See [./raw-writes.md](./raw-writes.md).
+The agent protections layer is the only layer that `danger-raw-write` makes weaker, and it
+keeps the idempotency key and the write budget. The sandbox layer stays intact. See
+[raw-writes.md](raw-writes.md).
 
 ## Guarantees
 
@@ -41,21 +42,32 @@ With the default configuration, these statements are true:
 - Remote access needs authentication.
 - Default permissions are read-only.
 - `read` does not imply `write`.
+- A write permission is not valid without `schema` and `read`.
 - `write` does not accept caller-supplied write SQL.
 - Structured `update` and `delete` need a predicate.
-- Structured `update` and `delete` have a hard row limit.
-- Repeated structured writes hit a rate limit.
+- Structured `update` and `delete` have a hard row limit, and a broad filter is rejected before the write starts.
+- A repeated write with the same `requestId` applies one time only.
+- Repeated structured writes reach a rate limit.
 - Raw writes need an explicitly dangerous permission.
 - Raw writes cannot run DDL, `ATTACH` or native extension loading.
 - A caller cannot supply a backup filesystem path.
+- A complete backup file is always a complete database. A partial copy keeps a `.partial` suffix.
 - Queries have a time limit, a result limit and a concurrency limit.
 - The native SQLite defensive mechanisms are on.
-- The database file is never served over the network.
+- The database file never goes over the network.
 
 State security claims as concrete controls. Do not imply that a network-exposed database is
 absolutely safe.
 
 ## Non-guarantees
+
+The MVP has **no undo**. A `delete` inside the configured limits commits, and there is no
+restore tool. The operator owns the backup strategy. See
+[../../decisions/0001-no-undo-in-mvp.md](../../decisions/0001-no-undo-in-mvp.md).
+
+A permission applies to all tables. `write` does not protect one table from an agent that has
+`write`. See
+[../../decisions/0002-write-is-a-whole-database-grant.md](../../decisions/0002-write-is-a-whole-database-grant.md).
 
 When an operator enables `danger-raw-write`, the token holder can run this statement:
 
@@ -63,12 +75,15 @@ When an operator enables `danger-raw-write`, the token holder can run this state
 DELETE FROM jobs;
 ```
 
-This is expected behavior, not a defect. The permission deliberately bypasses the
-structured write safeguards.
+This is expected behavior, not a defect. The permission deliberately bypasses the structured
+write safeguards.
 
 A stolen token receives exactly the capabilities of its deployment. The sidecar limits
 capability and blast radius. It cannot make an intentionally granted destructive permission
 harmless.
+
+The write budget and the idempotency cache are per process. Two sidecar processes against one
+database have two independent budgets and two independent caches.
 
 ## Related
 

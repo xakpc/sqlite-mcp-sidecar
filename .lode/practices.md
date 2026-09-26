@@ -32,7 +32,8 @@ src/Xakpc.SQLiteMCPSidecar/
     Database/        SqliteService.cs, SqliteSecurity.cs,
                      StructuredWriteBuilder.cs, BackupService.cs
     Mcp/             SqliteTools.cs
-    Security/        TokenAuthentication.cs, WriteBudget.cs
+    Security/        TokenAuthentication.cs, WriteBudget.cs,
+                     WriteDeduplication.cs
 ```
 
 Do not declare an interface when only one implementation exists. Use concrete classes and
@@ -44,6 +45,8 @@ constructor injection.
 - Apply the sandbox to every connection that untrusted input reaches. See [plans/design/sqlite-sandbox.md](plans/design/sqlite-sandbox.md).
 - Parameterize every value. Validate every identifier against the live schema.
 - Accept exactly one SQL statement per raw request.
+- Start a write transaction with `BEGIN IMMEDIATE`, never with `BEGIN`. SQLite does not call the busy handler for a lock upgrade.
+- Give each write tool a mandatory `requestId`. Cache a committed response only. See [plans/design/write-idempotency.md](plans/design/write-idempotency.md).
 - Fail startup when required configuration is absent. Do not start in a degraded state.
 - Return a small error code. Do not return a stack trace, a secret or a filesystem path.
 

@@ -83,6 +83,6 @@ vector against the owning application.
 
 ## Related
 
-- [summary.md](security-model.md)
+- [security-model.md](security-model.md)
 - [permission-model.md](permission-model.md)
 - [./container-and-deployment.md](./container-and-deployment.md)

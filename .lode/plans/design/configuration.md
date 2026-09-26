@@ -3,8 +3,8 @@
 > **Status: planned.** This file records target design. No code implements it yet.
 > Current state is in [../../summary.md](../../summary.md). Sequence is in [../mvp-roadmap.md](../mvp-roadmap.md).
 
-All configuration arrives through environment variables with the `SQLITE_SIDECAR_` prefix.
-One process binds one `SidecarOptions` instance at startup.
+All configuration comes from environment variables with the `SQLITE_SIDECAR_` prefix. One
+process binds one `SidecarOptions` instance at startup.
 
 ## Required
 
@@ -13,8 +13,8 @@ SQLITE_SIDECAR_DB=/data/app.db
 SQLITE_SIDECAR_TOKEN=<secret>
 ```
 
-Startup fails when either value is absent. Do not start in a degraded or read-only fallback
-state, because a silent fallback hides a deployment mistake.
+Startup fails when one of these values is absent. Do not start in a degraded state and do not
+fall back to read-only, because a silent fallback hides a deployment mistake.
 
 ## Permissions
 
@@ -32,9 +32,12 @@ SQLITE_SIDECAR_PERMISSIONS=schema,read,write,backup
 SQLITE_SIDECAR_PERMISSIONS=schema,read,write,backup,diagnostics,danger-raw-write
 ```
 
-Reject an unknown permission name at startup. A typo such as `reed` must fail loudly, because
-a silently ignored name produces a deployment with fewer tools than the operator expects, or
-a false sense of restriction.
+Reject an unknown permission name at startup. A spelling mistake such as `reed` must fail
+loudly, because an ignored name gives a deployment with fewer tools than the operator expects,
+or a false sense of restriction.
+
+Reject `write` or `danger-raw-write` without `schema` and `read`. See
+[permission-model.md](permission-model.md).
 
 ## Optional
 
@@ -52,9 +55,13 @@ SQLITE_SIDECAR_MAX_CONCURRENCY=4
 
 SQLITE_SIDECAR_MAX_WRITE_ROWS=100
 SQLITE_SIDECAR_MAX_WRITE_ROWS_PER_MINUTE=500
-
-SQLITE_SIDECAR_BACKUP_BEFORE_DELETE=false
 ```
+
+There is no backup timeout variable. The runaway cap of the background backup is a hardcoded
+constant of 10 minutes. See [backups.md](backups.md).
+
+There is no idempotency variable. The deduplication window and the entry count are constants.
+See [write-idempotency.md](write-idempotency.md).
 
 ## Startup validation
 
@@ -64,25 +71,48 @@ flowchart TD
     req -->|no| fail[Fail startup]
     req -->|yes| perms{Permission names known?}
     perms -->|no| fail
-    perms -->|yes| file{DB file exists and is readable?}
+    perms -->|yes| floor{Write permission has schema and read?}
+    floor -->|no| fail
+    floor -->|yes| file{DB file exists and is readable?}
     file -->|no| fail
-    file -->|yes| bk{backup enabled?}
+    file -->|yes| bk{backup permission on?}
     bk -->|yes| dir{BACKUP_DIR set and writable?}
     dir -->|no| fail
-    dir -->|yes| ok[Serve]
-    bk -->|no| ok
+    dir -->|yes| wal[Read journal_mode]
+    bk -->|no| wal
+    wal --> warn{WAL, or no write permission?}
+    warn -->|no| log[Log a warning, then serve]
+    warn -->|yes| ok[Serve]
 ```
 
 Validate these conditions at startup:
 
 - `SQLITE_SIDECAR_DB` exists and is readable. Do not create it.
-- Every permission name is known.
-- The `backup` permission comes with a writable `SQLITE_SIDECAR_BACKUP_DIR`.
-- `SQLITE_SIDECAR_BACKUP_BEFORE_DELETE=true` comes with a usable backup directory.
-- Every numeric limit is positive and inside a sane range.
+- Each permission name is known.
+- `write` and `danger-raw-write` have `schema` and `read`.
+- The `backup` permission has a writable `SQLITE_SIDECAR_BACKUP_DIR`.
+- Each numeric limit is positive and in a sensible range.
 
-A startup check is far better than a first-request failure, because a container orchestrator
-sees a failed start and an operator sees it immediately.
+A startup check is much better than a failure at the first request, because a container
+orchestrator sees a failed start and an operator sees it immediately.
+
+## Journal mode warning
+
+The sidecar reads `journal_mode` at startup. It never changes the value.
+
+A database that is not in WAL mode blocks all readers of the owning application during a
+sidecar write. The sidecar therefore logs a prominent warning when the database is not in WAL
+mode and the deployment has `write` or `danger-raw-write`.
+
+The sidecar still serves requests. The journal mode is a property of the database of another
+application, not a mistake in the sidecar configuration. A refusal to start would make the
+sidecar unusable with many correct deployments. The `diagnostics` tool reports the value, thus
+an operator can see it at any time.
+
+## Delete on startup
+
+The process deletes stale `*.db.partial` files in the backup directory. See
+[backups.md](backups.md).
 
 ## ASP.NET Core settings
 
@@ -111,12 +141,11 @@ public sealed class SidecarOptions
     public int MaxConcurrency { get; init; } = 4;
     public int MaxWriteRows { get; init; } = 100;
     public int MaxWriteRowsPerMinute { get; init; } = 500;
-    public bool BackupBeforeDelete { get; init; }
 }
 ```
 
-Bind once at startup and treat the instance as immutable. There is no runtime reconfiguration
-in the MVP, because a permission change must be a visible deployment change.
+Bind one time at startup and treat the instance as immutable. There is no reconfiguration at
+runtime in the MVP, because a permission change must be a visible deployment change.
 
 ## Related
 

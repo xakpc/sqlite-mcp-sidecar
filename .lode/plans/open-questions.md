@@ -4,6 +4,10 @@ Decisions that implementation must settle. Each item names the trigger, the opti
 recommendation. Remove an item when the code settles it, and move the outcome into the
 matching design file.
 
+Only the NativeAOT pair is open. Discussion cannot settle it, because it needs a real publish
+run. The other items moved into the design files after the design review. Hard decisions with
+a permanent effect are in [../decisions/](../decisions/).
+
 ## 1. NativeAOT viability
 
 **Trigger.** Phase 8. See [mvp-roadmap.md](mvp-roadmap.md).
@@ -13,91 +17,36 @@ fallback.
 
 Findings from package inspection:
 
-- `Microsoft.Data.Sqlite` 10.0.12 with the bundled native SQLite works under AOT.
-- `ModelContextProtocol.Core` 2.2.0 carries one `RequiresUnreferencedCode` annotation. Assembly scanning is the likely site, so explicit `WithTools<T>()` registration avoids it. Tool schema generation from method signatures is still reflection-based, and that is the real risk.
-- `Toon.DotNet` 4.1.1 declares no `RequiresUnreferencedCode` and no `RequiresDynamicCode`. Absence of an annotation is not proof of AOT safety. The `Toon.Encode(object, ...)` path reflects over the argument type. The `DataTable` overload avoids that.
+- `Microsoft.Data.Sqlite` 10.0.12 with the bundled native SQLite operates under AOT.
+- `ModelContextProtocol.Core` 2.2.0 has one `RequiresUnreferencedCode` annotation. Assembly scanning is the probable site, thus explicit `WithTools<T>()` registration prevents it. Tool schema generation from method signatures still uses reflection, and that is the real risk.
+- `Toon.DotNet` 4.1.1 declares no `RequiresUnreferencedCode` and no `RequiresDynamicCode`. An absent annotation is not proof of AOT safety. The `Toon.Encode(object, ...)` path reflects over the argument type. The `DataTable` overload prevents that.
 
-**Recommendation.** Attempt AOT. Prefer the `DataTable` shape for results. Do not restructure
-the architecture to obtain AOT. Decide with a real `dotnet publish -r linux-x64` run, not from
+**Recommendation.** Attempt AOT. Prefer the `DataTable` shape for results. Do not change the
+architecture to get AOT. Decide with a real `dotnet publish -r linux-x64` run, not from
 annotations.
 
-## 2. Raw-write accounting against the write budget
+## 2. Minimal container base image
 
-**Trigger.** Phase 6. See [design/raw-writes.md](design/raw-writes.md).
+**Trigger.** Phase 7 and Phase 8. See
+[design/container-and-deployment.md](design/container-and-deployment.md).
 
-The design says the budget applies to structured writes, and that raw writes should also count
-when the implementation stays simple.
+The design asks for a minimal image with no development toolchain. The candidates are
+different if AOT succeeds.
 
-SQLite reports the affected row count after execution, so counting is easy. The nuance is that
-the count arrives too late to prevent the write.
+**Recommendation.** Decide after question 1. A successful AOT build permits a much smaller
+base than the `aspnet` runtime image.
 
-**Recommendation.** Count raw writes toward the budget after execution. Document the budget as
-a throttle on subsequent operations, not as a pre-check for raw writes. Record the final
-wording in `SECURITY.md`.
+## Verification tasks, not open questions
 
-## 3. Backup-before-delete for raw deletes
+These items have a decision. Implementation must prove one fact for each of them.
 
-**Trigger.** Phase 6. See [design/structured-writes.md](design/structured-writes.md).
-
-The policy is well defined for structured `delete`. A raw statement may delete, may update, or
-may do both through a CTE, so the sidecar cannot cheaply know that a delete will happen before
-execution.
-
-Options:
-
-1. Apply the policy to every `execute_write_sql` call. It is simple and safe, but it makes a
-   backup for every raw update as well.
-2. Apply it only when the authorizer observes a delete action. It is accurate, but the
-   authorizer runs during preparation, which complicates the ordering.
-3. Do not apply it to raw writes, and document the gap.
-
-**Recommendation.** Option 1. An operator that enables both `danger-raw-write` and
-backup-before-delete has chosen caution over speed. Make the behavior obvious rather than
-clever.
-
-## 4. Connection pooling
-
-**Trigger.** Phase 2. See [design/connection-policy.md](design/connection-policy.md).
-
-A pooled handle keeps the authorizer and the limits from the previous operation. That is a
-privilege-escalation path.
-
-**Recommendation.** Set `Pooling=False` for the MVP. It removes the whole class of
-residual-state defects. Measure the open cost before any change, because a local SQLite open is
-cheap.
-
-## 5. Byte-limit behavior
-
-**Trigger.** Phase 3. See [design/toon-results.md](design/toon-results.md).
-
-The design lists both a `truncated` flag and a `ResultTooLarge` error, and it does not say
-which one the byte limit produces.
-
-**Recommendation.** Truncate and set `truncated: true`, the same as the row limit. Reserve
-`ResultTooLarge` for a single row that exceeds the budget on its own, where no useful partial
-result exists.
-
-## 6. Schema tool output shape
-
-**Trigger.** Phase 3. See [design/mcp-tool-catalog.md](design/mcp-tool-catalog.md).
-
-Schema metadata is not one flat table. Tables, columns, primary keys and foreign keys have
-different shapes, and the design says only that tabular parts are TOON.
-
-**Recommendation.** Emit one TOON block per relation kind under a labeled heading. Decide the
-exact layout against a real agent, because readability for the agent is the only criterion.
-
-## 7. Minimal container base image
-
-**Trigger.** Phase 7. See [design/container-and-deployment.md](design/container-and-deployment.md).
-
-The design asks for a minimal image with no development toolchain. The candidates differ if
-AOT succeeds.
-
-**Recommendation.** Decide after question 1. A successful AOT build allows a much smaller base
-than the `aspnet` runtime image.
+| Task | Phase | Fact to prove |
+| --- | --- | --- |
+| Backup cancellation | 5 | `sqlite3_interrupt` on the source connection stops a running `BackupDatabase` call. If it does not, remove the runaway cap and document the size limit. See [design/backups.md](design/backups.md). |
+| Schema output | 3 | A real agent uses the DDL output correctly. The choice is cheap to reverse. See [design/mcp-tool-catalog.md](design/mcp-tool-catalog.md). |
 
 ## Related
 
 - [mvp-roadmap.md](mvp-roadmap.md)
 - [design/](design/)
+- [../decisions/](../decisions/)

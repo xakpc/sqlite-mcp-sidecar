@@ -69,7 +69,7 @@ authorizer runs inside the SQLite parser and sees the resolved action.
 
 | Action | `query` | Structured write | `execute_write_sql` |
 | --- | --- | --- | --- |
-| Read | allow | allow when necessary | allow when necessary |
+| Read | allow | allow, the bounded pre-count needs it | allow when necessary |
 | `INSERT` / `UPDATE` / `DELETE` | reject | allow when required | allow |
 | DDL (`CREATE`, `DROP`, `ALTER`) | reject | reject | reject |
 | `ATTACH` / `DETACH` | reject | reject | reject |
@@ -79,6 +79,29 @@ authorizer runs inside the SQLite parser and sees the resolved action.
 
 The authorizer is per-operation. Build the policy from the tool that runs, not from the
 deployment permission set.
+
+### Server statements and the authorizer
+
+**Invariant.** The authorizer rejects transaction control, and the sidecar itself runs `BEGIN
+IMMEDIATE`, `COMMIT` and `ROLLBACK` for a structured write. The policy applies to
+caller-influenced statements only.
+
+Install the authorizer after the server opens its own transaction, and remove it before the
+server commits or rolls back.
+
+```text
+open connection
+apply the baseline
+BEGIN IMMEDIATE            <- no authorizer
+install the authorizer
+pre-count, then the write  <- authorizer active
+remove the authorizer
+COMMIT or ROLLBACK         <- no authorizer
+```
+
+A rejection of the transaction statements of the server makes the structured write path
+impossible, thus this order is not optional. See
+[structured-writes.md](structured-writes.md).
 
 ## Runtime limits
 
@@ -155,7 +178,7 @@ stop path and it also bounds a statement that never yields.
 
 ## Related
 
-- [summary.md](security-model.md)
+- [security-model.md](security-model.md)
 - [./connection-policy.md](./connection-policy.md)
 - [./raw-writes.md](./raw-writes.md)
 - Required tests: [../mvp-roadmap.md](../mvp-roadmap.md)

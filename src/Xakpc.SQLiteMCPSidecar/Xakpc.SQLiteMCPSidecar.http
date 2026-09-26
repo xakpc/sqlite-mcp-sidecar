@@ -1,0 +1,6 @@
+@Xakpc.SQLiteMCPSidecar_HostAddress = http://localhost:5282
+
+GET {{Xakpc.SQLiteMCPSidecar_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

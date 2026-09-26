@@ -27,8 +27,8 @@ The order is deliberate. The sandbox lands before each tool that runs caller SQL
 phase ships an unprotected query path. `danger-raw-write` lands last, thus the safe interface
 is complete and proven first.
 
-`schema` moved ahead of the sandbox for one reason only: it runs a server-authored statement and it
-takes no caller input. The rule stays unbroken.
+`schema` is outside that order and it does not break the rule: it runs a server-authored statement
+and it takes no caller input. Each tool that runs caller SQL still waits for the sandbox.
 
 ### Phase 0 — strip the template. Done
 

@@ -48,20 +48,7 @@ $backupDirectory = Join-Path $devDirectory 'backups'
 
 New-Item -ItemType Directory -Force -Path $devDirectory, $backupDirectory | Out-Null
 
-if ($Fresh -or -not (Test-Path $databasePath)) {
-    Write-Host "Seeding $databasePath from the sample script..." -ForegroundColor Cyan
-
-    # The seeding lives in the test project, thus the dev script and the test suite share one
-    # implementation: no second project, no checked-in binary, no sqlite3 prerequisite.
-    $env:SIDECAR_DEV_DB = $databasePath
-    dotnet test --solution (Join-Path $repositoryRoot 'Xakpc.SQLiteMCPSidecar.slnx') `
-        --filter-method '*DevDatabaseTests.Create'
-    Remove-Item Env:\SIDECAR_DEV_DB
-
-    if (-not (Test-Path $databasePath)) {
-        throw "The sample database was not created at $databasePath."
-    }
-}
+& (Join-Path $PSScriptRoot 'seed-dev-db.ps1') -Force:$Fresh | Out-Null
 
 $env:SQLITE_SIDECAR_DB = $databasePath
 $env:SQLITE_SIDECAR_TOKEN = $Token

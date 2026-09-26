@@ -42,11 +42,14 @@ Xakpc.SQLiteMCPSidecar.slnx
 Directory.Build.props              # output to build/bin, build/obj
 global.json                        # selects the Microsoft.Testing.Platform test runner
 .github/workflows/ci.yml           # build and test on Linux
-scripts/dev-sidecar.ps1            # a live sidecar over a seeded sample database
+scripts/
+    seed-dev-db.ps1                # builds build/dev/app.db, run it before the first launch
+    dev-sidecar.ps1                # a live sidecar with any permission set
 src/Xakpc.SQLiteMCPSidecar/
     Program.cs
     mcp.http                       # manual MCP requests
     Dockerfile                     # still the Visual Studio template, Phase 7
+    Properties/launchSettings.json # one profile for each deployment shape
     Configuration/                 SidecarOptions.cs, SidecarStartup.cs
     Database/                      SqliteService.cs
     Mcp/                           SqliteTools.cs, SidecarError.cs
@@ -104,8 +107,14 @@ error message. Nothing in the code enforces this rule.
 
 ```powershell
 dotnet test --solution Xakpc.SQLiteMCPSidecar.slnx   # the whole suite
+
+./scripts/seed-dev-db.ps1                            # one time, before the first launch
+# then F5 on a launch profile, or:
 ./scripts/dev-sidecar.ps1                            # a live sidecar on port 8080
 ```
+
+Each launch profile and the script serve `http://localhost:8080` with the token `dev-token`, thus
+`src/Xakpc.SQLiteMCPSidecar/mcp.http` calls any of them with no change.
 
 See [testing/e2e-harness.md](testing/e2e-harness.md).
 

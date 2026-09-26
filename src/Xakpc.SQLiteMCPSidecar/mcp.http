@@ -1,4 +1,5 @@
-# Manual calls against a sidecar from scripts/dev-sidecar.ps1.
+# Manual calls against a sidecar from a launch profile (F5) or from scripts/dev-sidecar.ps1.
+# Run ./scripts/seed-dev-db.ps1 one time first.
 #
 # The transport is stateless: the 2026-07-28 protocol revision removed the Mcp-Session-Id header
 # (SEP-2567) and the initialize handshake (SEP-2575). Every request below is therefore

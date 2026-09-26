@@ -87,26 +87,46 @@ rollback-journal case of the startup warning test.
 next to it, and `Dispose` removes the directory. A held SQLite handle on Windows can block the
 delete, and a leftover temporary directory is not a test failure.
 
-## The dev script shares the seeding
+## The manual path shares the seeding
 
 `Fixtures/DevDatabaseTests.Create` writes the sample database to the path in `SIDECAR_DEV_DB`. It is
-skipped when that variable is absent.
-
-```powershell
-./scripts/dev-sidecar.ps1 [-Permissions schema,read] [-Port 8080] [-Token dev-token] [-Fresh]
-```
-
-The script sets `SIDECAR_DEV_DB`, runs that one test with
-`dotnet test --filter-method '*DevDatabaseTests.Create'`, and then starts the sidecar over
-`build/dev/app.db`.
+skipped when that variable is absent. `scripts/seed-dev-db.ps1` sets that variable, runs this one
+test with `dotnet test --filter-method '*DevDatabaseTests.Create'`, and creates
+`build/dev/backups` next to the database.
 
 This keeps one seeding implementation for the manual path and the automated path. The alternatives
 were a second project, a database file in the repository, or a `sqlite3` prerequisite.
 `/build/dev/` is in `.gitignore`: the `[Bb]in/` and `[Oo]bj/` rules cover `build/bin` and
 `build/obj` only.
 
+There are two ways to start a sidecar by hand, and both serve `http://localhost:8080` with the token
+`dev-token`.
+
+```powershell
+./scripts/seed-dev-db.ps1        # one time, before the first launch
+```
+
+**Launch profiles**, for F5 in Visual Studio. One profile for each deployment shape:
+`read-only (schema,read)`, `agent (schema,read,write,backup)` and
+`privileged (all permissions)`. `SQLITE_SIDECAR_DB` is `../../build/dev/app.db`, which is relative
+to the project directory, and that directory is the working directory and the content root.
+
+There is no HTTPS profile, because a reverse proxy terminates TLS and the sidecar has no HTTPS
+redirection. There is no container profile, because the Dockerfile is still the template and it
+mounts no database. Phase 7 adds one.
+
+**The script**, for a permission set that no profile carries, and for a startup failure:
+
+```powershell
+./scripts/dev-sidecar.ps1 [-Permissions schema,read] [-Port 8080] [-Token dev-token] [-Fresh]
+./scripts/dev-sidecar.ps1 -Permissions write     # shows the read-floor startup failure
+```
+
+`ASPNETCORE_ENVIRONMENT=Development` gives plain console logs. Outside development the sidecar logs
+JSON, which is what a container log pipeline needs.
+
 `src/Xakpc.SQLiteMCPSidecar/mcp.http` holds the manual requests, and its `@host` and `@token`
-variables match the script defaults.
+variables match both paths.
 
 ## Test classes
 

@@ -1,8 +1,7 @@
 # Practices
 
-Patterns and constraints that apply to all code in this project. These rules are active now:
-they govern the code that the phases in [plans/mvp-roadmap.md](plans/mvp-roadmap.md) produce.
-The folder layout below does not exist yet.
+Patterns and constraints that apply to all code in this project. They govern the code that exists
+and the code that the remaining phases in [plans/mvp-roadmap.md](plans/mvp-roadmap.md) produce.
 
 ## Design rules
 
@@ -23,21 +22,30 @@ a second sidecar. The full exclusion list is in [plans/out-of-scope.md](plans/ou
 
 ## Code organization
 
-Folders group source files. They are not separate libraries. Do not add a project.
+Folders group source files. They are not separate libraries. Do not add a project, and do not add a
+fifth folder.
 
 ```text
 src/Xakpc.SQLiteMCPSidecar/
     Program.cs
-    Configuration/   SidecarOptions.cs
-    Database/        SqliteService.cs, SqliteSecurity.cs,
+    Configuration/   SidecarOptions.cs, SidecarStartup.cs
+    Database/        SqliteService.cs, and later SqliteSecurity.cs,
                      StructuredWriteBuilder.cs, BackupService.cs
-    Mcp/             SqliteTools.cs
-    Security/        TokenAuthentication.cs, WriteBudget.cs,
-                     WriteDeduplication.cs
+    Mcp/             SqliteTools.cs, SidecarError.cs
+    Security/        PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs,
+                     and later WriteBudget.cs, WriteDeduplication.cs
 ```
 
+Startup validation lives in `Configuration/`, not in a `Startup/` folder. One file does not earn a
+folder.
+
 Do not declare an interface when only one implementation exists. Use concrete classes and
-constructor injection.
+constructor injection. `IOptions<T>` is an interface wrapper with one implementation: register the
+one `SidecarOptions` instance and inject it. See
+[configuration/options.md](configuration/options.md).
+
+Keep a `[LoggerMessage]` partial method in the class that uses it. Source-generated logging is
+AOT-friendly and it needs no separate folder.
 
 ## Security practices
 
@@ -79,9 +87,19 @@ Register tools explicitly. Do not use `WithToolsFromAssembly`.
 ```csharp
 builder.Services
     .AddMcpServer()
-    .WithHttpTransport(o => o.Stateless = true)
+    .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
+    .AddAuthorizationFilters()
     .WithTools<SqliteTools>();
 ```
+
+Use `SessionMode` and not the `Stateless` property. `Stateless` is a convenience proxy over
+`SessionMode`, and `SessionMode` also names the `StatefulForInitializeClients` value. Stateless is
+already the default as of the `2026-07-28` protocol revision.
+
+**Always call `AddAuthorizationFilters()`.** It is what makes `[Authorize]` on a tool effective, in
+`tools/list` and in `tools/call`. Without it the attribute is inert and every tool is reachable.
+Permission gating is therefore an attribute on the tool method and never a hand-written check. See
+[security/permissions.md](security/permissions.md).
 
 Explicit registration has two reasons. It keeps the exposed tool set under permission
 control, and assembly scanning is annotated `RequiresUnreferencedCode`, which blocks
@@ -96,7 +114,15 @@ Add a package only when it removes a meaningful amount of code.
 | --- | --- | --- |
 | `Microsoft.Data.Sqlite` | 10.0.12 | ADO.NET provider and bundled native SQLite. |
 | `ModelContextProtocol.AspNetCore` | 2.2.0 | MCP server and Streamable HTTP transport. |
-| `Toon.DotNet` | 4.1.1 | TOON serializer. Namespace is `ToonFormat`. |
+| `Toon.DotNet` | 4.1.1 | TOON serializer. Namespace is `ToonFormat`. Unused until the `query` tool. |
+
+Test project:
+
+| Package | Version | Purpose |
+| --- | --- | --- |
+| `xunit.v3` | 4.0.1 | Test framework on Microsoft.Testing.Platform. |
+| `Microsoft.AspNetCore.Mvc.Testing` | 10.0.12 | `WebApplicationFactory` for the in-process target. |
+| `ModelContextProtocol.Core` | 2.2.0 | The MCP client: `HttpClientTransport`, `McpClient`. |
 
 `SQLitePCLRaw.core` arrives through `Microsoft.Data.Sqlite`. The sidecar calls it directly
 for the sandbox. Do not add a separate reference unless the transitive one disappears.
@@ -106,16 +132,44 @@ TOON serializer.
 
 ## Testing
 
-Tests live in `test/`. Security tests are mandatory, not optional. The required cases are
-listed in [plans/mvp-roadmap.md](plans/mvp-roadmap.md). Run the functional suite against
-the published Linux artifact, because the sandbox depends on the native SQLite build.
+One test project, `test/Xakpc.SQLiteMCPSidecar.Tests`. Security tests are mandatory, not optional.
+The required cases are listed in [plans/mvp-roadmap.md](plans/mvp-roadmap.md).
+
+Write a new test through `SidecarHarness`, never against a hand-built host. The harness runs the
+same test in process and against a real sidecar, and the second target is how the functional suite
+reaches the published Linux artifact. The sandbox depends on the native SQLite build, thus a Windows
+developer run does not prove the shipped behaviour. See
+[testing/e2e-harness.md](testing/e2e-harness.md).
+
+The test project uses `xunit.v3` on Microsoft.Testing.Platform. It has no `Microsoft.NET.Test.Sdk`
+and no `xunit.runner.visualstudio`: the .NET 10 SDK no longer supports the VSTest target.
+`global.json` selects the runner, thus the commands are `dotnet test --solution <file>` and
+`--filter-method` in place of `--filter`.
+
+Seed test data from `Fixtures/sample-db.sql` only. It is the one source of truth, and the dev script
+uses it too.
 
 ## NativeAOT
 
 Target NativeAOT from the start, but do not distort the architecture for it.
 
 ```xml
-<PublishAot>true</PublishAot>
+<IsAotCompatible>true</IsAotCompatible>
+```
+
+The analyzers run now and `PublishAot` stays off until Phase 8. This catches an AOT hazard at the
+line that causes it, at no publish cost. The production project builds with no IL warning today, and
+keep it that way.
+
+**Lesson.** The `Delegate` overload of `MapGet` reflects over the delegate signature and it raises
+IL2026 and IL3050. The `RequestDelegate` overload does not:
+
+```csharp
+app.MapGet("/health", static context =>
+{
+    context.Response.ContentType = "application/json";
+    return context.Response.WriteAsync("""{"status":"ok"}""");
+});
 ```
 
 Prefer `CreateSlimBuilder`, explicit registrations and source-generated JSON. If a

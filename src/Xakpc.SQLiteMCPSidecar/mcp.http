@@ -1,0 +1,60 @@
+# Manual calls against a sidecar from scripts/dev-sidecar.ps1.
+#
+# The transport is stateless: the 2026-07-28 protocol revision removed the Mcp-Session-Id header
+# (SEP-2567) and the initialize handshake (SEP-2575). Every request below is therefore
+# self-contained, and there is no session id to copy from one request to the next.
+
+@host = http://localhost:8080
+@token = dev-token
+
+### Process health. It needs no token and it touches no database.
+GET {{host}}/health
+
+### No Authorization header. Expect 401 with a bare "Bearer" challenge.
+POST {{host}}/mcp
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":1,"method":"tools/list"}
+
+### A wrong token. Expect the same 401: the answer does not state which check failed.
+POST {{host}}/mcp
+Authorization: Bearer not-the-token
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":1,"method":"tools/list"}
+
+### The tool list. It holds the permitted tools only.
+POST {{host}}/mcp
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":1,"method":"tools/list"}
+
+### The schema tool. It returns DDL text and no row data.
+POST {{host}}/mcp
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"schema","arguments":{}}}
+
+### A tool that the permission set does not cover. Start the sidecar with -Permissions read, then
+### expect a forbidden answer although the name is correct.
+POST {{host}}/mcp
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"schema","arguments":{}}}
+
+### The initialize handshake. A client on the 2025-11-25 revision or earlier sends it. The server
+### answers it, and the tool requests above work without it.
+POST {{host}}/mcp
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":4,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"mcp.http","version":"1.0"}}}

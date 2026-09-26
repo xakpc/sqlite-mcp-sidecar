@@ -12,7 +12,7 @@ different permission. See [raw-writes.md](raw-writes.md).
 
 **Read floor.** The `write` permission is only valid together with `schema` and `read`. The
 sidecar validates identifiers against the live schema, thus an agent that cannot read the
-schema cannot use these tools correctly. See [permission-model.md](permission-model.md).
+schema cannot use these tools correctly. See [../../security/permissions.md](../../security/permissions.md).
 
 **Scope.** The `write` permission applies to all tables in the database. There is no table
 allowlist. The README must show this in the permission risk table.

@@ -36,5 +36,5 @@ permission set. The real reason is cost control, not the identity model.
 
 ## Related
 
-- [../plans/design/permission-model.md](../plans/design/permission-model.md)
+- [../security/permissions.md](../security/permissions.md)
 - [../plans/out-of-scope.md](../plans/out-of-scope.md)

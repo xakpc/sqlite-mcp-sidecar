@@ -367,3 +367,6 @@ FodyWeavers.xsd
 # Development certificate
 devcert.pfx
 TestMedia
+
+# The dev database and backups of scripts/dev-sidecar.ps1.
+/build/dev/

@@ -22,6 +22,9 @@ documentation.
 - **`diagnostics`** — permission to read database health values.
 - **`danger-raw-write`** — permission to run caller-supplied `INSERT`, `UPDATE` and `DELETE` SQL.
 - **read floor** — the rule that `write` and `danger-raw-write` are only valid together with `schema` and `read`. Startup enforces it.
+- **permission claim** — the `perm` claim that the authentication handler issues for each permission of the deployment. An `[Authorize(Policy = "perm:<name>")]` policy tests it.
+- **primary gating** — the removal of an unpermitted tool from `tools/list`. It is the main control.
+- **backstop gating** — the rejection of a direct `tools/call` of an unpermitted tool name. It covers a registration mistake.
 
 ## Writes
 
@@ -35,6 +38,14 @@ documentation.
 - **write budget** — the rolling per-minute cap on total written rows for the sidecar **process**. It is not shared between processes.
 - **`requestId`** — the mandatory idempotency key on each write tool. The same key returns the stored response of a committed write.
 - **replayed write** — a write request that the sidecar answered from the idempotency cache. It changed nothing.
+
+## Testing
+
+- **harness** — `SidecarHarness`. It gives one sidecar under test, in this process or an external one.
+- **in-process target** — the default. `WebApplicationFactory` hosts the sidecar and the MCP client speaks over its `HttpClient`.
+- **external target** — a sidecar that already runs. `SIDECAR_E2E_URL`, `SIDECAR_E2E_TOKEN` and `SIDECAR_E2E_PERMISSIONS` select it.
+- **sample database** — the database that `Fixtures/sample-db.sql` builds. The test suite and the dev script share it.
+- **dev sidecar** — the live sidecar that `scripts/dev-sidecar.ps1` starts for a manual session.
 
 ## SQLite controls
 
@@ -61,7 +72,8 @@ documentation.
 
 ## Related
 
-- Permission detail: [plans/design/permission-model.md](plans/design/permission-model.md)
+- Permission detail: [security/permissions.md](security/permissions.md)
+- Testing detail: [testing/e2e-harness.md](testing/e2e-harness.md)
 - Sandbox detail: [plans/design/sqlite-sandbox.md](plans/design/sqlite-sandbox.md)
 - Idempotency detail: [plans/design/write-idempotency.md](plans/design/write-idempotency.md)
 - Result format detail: [plans/design/toon-results.md](plans/design/toon-results.md)

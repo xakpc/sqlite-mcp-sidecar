@@ -154,10 +154,10 @@ administration interface, and do not accept a caller-supplied `PRAGMA` name. A c
 ## Health endpoint
 
 `GET /health` is separate from the `diagnostics` tool. It reports process health only, and it
-touches no database. See [authentication-and-network.md](authentication-and-network.md).
+touches no database. See [../../security/authentication.md](../../security/authentication.md).
 
 ## Related
 
 - [connection-policy.md](connection-policy.md)
-- [mcp-tool-catalog.md](mcp-tool-catalog.md)
+- [../../mcp/tool-catalog.md](../../mcp/tool-catalog.md)
 - [container-and-deployment.md](container-and-deployment.md)

@@ -12,32 +12,49 @@ Linux OCI image under Apache-2.0.
 
 ## Implementation status
 
-**Nothing is implemented.** The repository holds the stock Visual Studio ASP.NET Core Web API
-template. `src/Xakpc.SQLiteMCPSidecar/Program.cs` still serves the `WeatherForecast` sample
-endpoint. `test/` is empty.
-
-The full design is therefore a plan. It lives under [plans/](plans/), and each design file
-carries a planned-status banner. Content moves out of `plans/design/` into a domain directory
-when code implements it.
+The foundation works end to end: configuration, startup validation, token authentication,
+permission gating, the stateless MCP endpoint, a read-only SQLite connection, the `schema` tool,
+and a dual-target end-to-end test harness.
 
 | Area | State |
 | --- | --- |
-| Design | Complete and recorded in [plans/design/](plans/design/) |
-| Plan of work | [plans/mvp-roadmap.md](plans/mvp-roadmap.md) |
-| Permanent decisions | [decisions/](decisions/) |
-| Code | Template only |
-| Tests | None |
+| Configuration and startup validation | Implemented — [configuration/options.md](configuration/options.md) |
+| Authentication and the health endpoint | Implemented — [security/authentication.md](security/authentication.md) |
+| Permissions and tool gating | Implemented — [security/permissions.md](security/permissions.md) |
+| MCP endpoint and the `schema` tool | Implemented — [mcp/tool-catalog.md](mcp/tool-catalog.md) |
+| Read-only connection | Implemented — [database/connections.md](database/connections.md) |
+| Test harness | Implemented — [testing/e2e-harness.md](testing/e2e-harness.md) |
+| SQLite sandbox | Not started — Phase 2 |
+| `query` and TOON | Not started — Phase 3 |
+| Structured writes | Not started — Phase 4 |
+| Backup and diagnostics | Not started — Phase 5 |
+| `danger-raw-write` | Not started — Phase 6 |
+| Container and documentation | Not started — Phase 7 |
+| NativeAOT | Analyzers on. The publish attempt is Phase 8 |
+
+The remaining design lives under [plans/design/](plans/design/), and each file there carries a
+status banner. Content moves out of `plans/design/` into a domain directory when code implements it.
 
 ## Repository layout
 
 ```text
 Xakpc.SQLiteMCPSidecar.slnx
 Directory.Build.props              # output to build/bin, build/obj
-src/Xakpc.SQLiteMCPSidecar/        # the one production project
-    Program.cs                     # template WeatherForecast sample
-    Dockerfile                     # Visual Studio template
-    appsettings.json               # AllowedHosts is "*", too wide for production
-test/                              # empty
+global.json                        # selects the Microsoft.Testing.Platform test runner
+.github/workflows/ci.yml           # build and test on Linux
+scripts/dev-sidecar.ps1            # a live sidecar over a seeded sample database
+src/Xakpc.SQLiteMCPSidecar/
+    Program.cs
+    mcp.http                       # manual MCP requests
+    Dockerfile                     # still the Visual Studio template, Phase 7
+    Configuration/                 SidecarOptions.cs, SidecarStartup.cs
+    Database/                      SqliteService.cs
+    Mcp/                           SqliteTools.cs, SidecarError.cs
+    Security/                      PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs
+test/Xakpc.SQLiteMCPSidecar.Tests/
+    Harness/                       SidecarHarness.cs
+    Fixtures/                      sample-db.sql, SampleDatabase.cs, DevDatabaseTests.cs
+    StartupTests.cs, AuthTests.cs, PermissionGatingTests.cs, SchemaToolTests.cs
 sqlite-sidecar-mcp — Design Document.md
 ```
 
@@ -57,7 +74,7 @@ This split is the core product idea. Keep it visible in code and in documentatio
 
 `write` and `danger-raw-write` are only valid together with `schema` and `read`. Each
 permission applies to each table in the database. See
-[plans/design/permission-model.md](plans/design/permission-model.md).
+[security/permissions.md](security/permissions.md).
 
 ## Nine tools
 
@@ -66,8 +83,8 @@ schema   query   insert   update   delete
 backup   backup_status   diagnostics   execute_write_sql
 ```
 
-The permission set decides which tools exist. See
-[plans/design/mcp-tool-catalog.md](plans/design/mcp-tool-catalog.md).
+`schema` exists. The permission set decides which tools exist. See
+[mcp/tool-catalog.md](mcp/tool-catalog.md).
 
 ## Context
 
@@ -82,6 +99,15 @@ flowchart TD
 **Invariant.** One sidecar process serves one database. The write budget and the idempotency
 cache are in process memory, thus a second replica makes both guarantees weaker without an
 error message. Nothing in the code enforces this rule.
+
+## Run it
+
+```powershell
+dotnet test --solution Xakpc.SQLiteMCPSidecar.slnx   # the whole suite
+./scripts/dev-sidecar.ps1                            # a live sidecar on port 8080
+```
+
+See [testing/e2e-harness.md](testing/e2e-harness.md).
 
 ## Lode entry points
 

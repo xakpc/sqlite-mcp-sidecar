@@ -50,7 +50,7 @@ generic database abstractions
 **More databases, users, roles and ACLs.** The MVP has one authentication identity, thus an
 internal permission model has nothing to attach to. A separate trust boundary uses a separate
 deployment, which keeps the boundary visible in the deployment configuration. See
-[design/permission-model.md](design/permission-model.md).
+[../security/permissions.md](../security/permissions.md).
 
 **Deployment-level table allowlist.** This one is not an ACL, and the identity argument above
 does not apply to it. We excluded it for cost control only. A permission therefore applies to
@@ -59,7 +59,7 @@ each table in the database. See
 
 **OAuth, OIDC and mTLS.** The reverse proxy owns transport identity. One bearer token agrees
 with the one-identity model. See
-[design/authentication-and-network.md](design/authentication-and-network.md).
+[../security/authentication.md](../security/authentication.md).
 
 **REST API, CLI and browser UI.** The product has one MCP endpoint. A second surface makes the
 security review area two times larger for no product gain. CORS is off, and browser access is

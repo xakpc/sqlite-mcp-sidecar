@@ -7,7 +7,7 @@ Row data goes to the agent as TOON. TOON is compact, thus it costs fewer tokens 
 row data.
 
 **TOON is for row data only.** The `schema` tool returns DDL text and no TOON. See
-[mcp-tool-catalog.md](mcp-tool-catalog.md).
+[../../mcp/tool-catalog.md](../../mcp/tool-catalog.md).
 
 ## Pipeline
 
@@ -112,6 +112,6 @@ partial result looks the same as normal truncation.
 
 ## Related
 
-- [mcp-tool-catalog.md](mcp-tool-catalog.md)
+- [../../mcp/tool-catalog.md](../../mcp/tool-catalog.md)
 - [error-model.md](error-model.md)
-- [configuration.md](configuration.md)
+- [../../configuration/options.md](../../configuration/options.md)

@@ -1,7 +1,13 @@
 # Error model
 
-> **Status: planned.** This file records target design. No code implements it yet.
-> Current state is in [../../summary.md](../../summary.md). Sequence is in [../mvp-roadmap.md](../mvp-roadmap.md).
+> **Status: partly implemented.** `Mcp/SidecarError.cs` declares the whole closed set. Only
+> `DatabaseError` and `QueryTimedOut` reach a caller today, from the `schema` tool. Each remaining
+> code arrives with the tool that produces it.
+>
+> **`PermissionDenied` is different.** The SDK authorization filter rejects an unpermitted
+> `tools/call` with its own message, `"Access forbidden: This tool requires authorization."`, and not
+> with this code. The outcome is the same and the agent must stop. See
+> [../../security/permissions.md](../../security/permissions.md).
 
 The error model is small and closed. A small set keeps agent behavior predictable, because an
 agent selects its next action from the code.

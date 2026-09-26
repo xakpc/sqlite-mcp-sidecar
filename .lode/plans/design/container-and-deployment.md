@@ -133,6 +133,6 @@ repository root.
 
 ## Related
 
-- [configuration.md](configuration.md)
-- [authentication-and-network.md](authentication-and-network.md)
+- [../../configuration/options.md](../../configuration/options.md)
+- [../../security/authentication.md](../../security/authentication.md)
 - [../open-questions.md](../open-questions.md)

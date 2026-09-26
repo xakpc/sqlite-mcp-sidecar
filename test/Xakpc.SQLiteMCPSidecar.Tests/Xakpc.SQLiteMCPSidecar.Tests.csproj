@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!-- xunit.v3 4.x runs on Microsoft.Testing.Platform. The .NET 10 SDK no longer supports the
+         VSTest target, thus this project has no Microsoft.NET.Test.Sdk and no VSTest runner. The
+         runner selection for "dotnet test" is in dotnet.config at the repository root. -->
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Xakpc.SQLiteMCPSidecar/Xakpc.SQLiteMCPSidecar.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Fixtures/sample-db.sql" />
+  </ItemGroup>
+
+</Project>

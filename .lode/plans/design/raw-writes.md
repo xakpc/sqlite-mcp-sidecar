@@ -8,7 +8,7 @@ caller-supplied DML statement. Some operators need normal SQL write semantics, a
 permission separates that need from the agent-safe structured interface.
 
 **Read floor.** `danger-raw-write` is only valid together with `schema` and `read`. See
-[permission-model.md](permission-model.md).
+[../../security/permissions.md](../../security/permissions.md).
 
 ## `execute_write_sql`
 
@@ -174,4 +174,4 @@ for an unbounded time.
 - [structured-writes.md](structured-writes.md)
 - [write-idempotency.md](write-idempotency.md)
 - [sqlite-sandbox.md](sqlite-sandbox.md)
-- [permission-model.md](permission-model.md)
+- [../../security/permissions.md](../../security/permissions.md)

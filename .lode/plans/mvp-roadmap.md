@@ -6,17 +6,16 @@ decisions are in [open-questions.md](open-questions.md).
 
 ## Current state
 
-The repository holds the Visual Studio ASP.NET Core Web API template.
-`src/Xakpc.SQLiteMCPSidecar/Program.cs` still serves the `WeatherForecast` sample. `test/` is
-empty. No sidecar code exists.
+Phase 0 and Phase 1 are done, and the `schema` tool of Phase 3 came with them. See
+[../summary.md](../summary.md) for the status table.
 
 ## Sequence
 
 ```mermaid
 flowchart TD
-    p0[Phase 0: strip the template] --> p1[Phase 1: configuration and auth]
+    p0[Phase 0: strip the template — done] --> p1[Phase 1: configuration and auth — done]
     p1 --> p2[Phase 2: SQLite sandbox]
-    p2 --> p3[Phase 3: schema and query + TOON]
+    p2 --> p3[Phase 3: query and TOON. schema is done]
     p3 --> p4[Phase 4: structured writes]
     p4 --> p5[Phase 5: backup and diagnostics]
     p5 --> p6[Phase 6: danger-raw-write]
@@ -28,27 +27,28 @@ The order is deliberate. The sandbox lands before each tool that runs caller SQL
 phase ships an unprotected query path. `danger-raw-write` lands last, thus the safe interface
 is complete and proven first.
 
-### Phase 0 — strip the template
+`schema` moved ahead of the sandbox for one reason only: it runs a server-authored statement and it
+takes no caller input. The rule stays unbroken.
 
-- Remove the `WeatherForecast` endpoint and record from `Program.cs`.
-- Remove the `Microsoft.AspNetCore.OpenApi` reference. The sidecar has no OpenAPI surface.
-- Remove `app.UseHttpsRedirection()`. The reverse proxy terminates TLS.
-- Create the folders `Configuration/`, `Database/`, `Mcp/`, `Security/`.
-- Add the three packages from [../practices.md](../practices.md).
-- Add a test project under `test/`.
+### Phase 0 — strip the template. Done
 
-### Phase 1 — configuration and authentication
+The template sample, the OpenAPI reference and the HTTPS redirection are gone. The three packages of
+[../practices.md](../practices.md) are in place, the folders are `Configuration/`, `Database/`,
+`Mcp/` and `Security/`, and `test/` holds one project.
 
-- `Configuration/SidecarOptions.cs` binds the `SQLITE_SIDECAR_` variables.
-- Startup validation, with the read floor. See [design/configuration.md](design/configuration.md).
-- The `journal_mode` read and the non-WAL warning.
-- `Security/TokenAuthentication.cs` with a constant-time comparison.
-- `GET /health` that touches no database.
-- Permission parsing, and a permission set type.
+### Phase 1 — configuration and authentication. Done
 
-Done when: a wrong token returns `Unauthorized`, an absent token or database fails startup,
-and a write permission without the read floor fails startup with a message that names the
-missing permission.
+Current state: [../configuration/options.md](../configuration/options.md),
+[../security/authentication.md](../security/authentication.md),
+[../security/permissions.md](../security/permissions.md).
+
+A wrong token returns `401`, an absent token or database fails startup, and a write permission
+without the read floor fails startup with a message that names the missing permission. The startup
+test list below runs in `StartupTests`.
+
+The phase also landed the MCP endpoint, the `schema` tool and the test harness. See
+[../mcp/tool-catalog.md](../mcp/tool-catalog.md) and
+[../testing/e2e-harness.md](../testing/e2e-harness.md).
 
 ### Phase 2 — SQLite sandbox
 
@@ -57,15 +57,15 @@ This is the foundation phase. See [design/sqlite-sandbox.md](design/sqlite-sandb
 - `Database/SqliteSecurity.cs` applies the baseline after each `Open`: defensive mode, trusted schema off, runtime limits, busy timeout.
 - Per-operation authorizer policies.
 - `sqlite3_interrupt` on the cancellation token.
-- Read-only and read-write connection factories. See [design/connection-policy.md](design/connection-policy.md).
-- The three semaphores.
+- The read-write connection factory. The read-only one exists: see [../database/connections.md](../database/connections.md) and [design/connection-policy.md](design/connection-policy.md).
+- The write semaphore and the backup semaphore. The request semaphore exists.
 
 Done when: each item of the hard-boundary test list below fails remotely, with no tool
 registered except a test harness.
 
-### Phase 3 — schema and query
+### Phase 3 — query and TOON
 
-- `schema` tool over a read-only connection. It returns DDL text and no TOON.
+- `schema` is done. See [../mcp/tool-catalog.md](../mcp/tool-catalog.md).
 - `query` tool, one statement, read-only connection plus `PRAGMA query_only=ON`.
 - TOON serialization with the row counter and the byte counter. See [design/toon-results.md](design/toon-results.md).
 - The error model. See [design/error-model.md](design/error-model.md).
@@ -141,7 +141,7 @@ SELECT load_extension('/tmp/malicious.so');
 VACUUM INTO '/tmp/copy.db';
 ```
 
-Startup tests:
+Startup tests. These run in `StartupTests`, and the list is complete:
 
 ```text
 permissions=write                    -> startup fails, the message names schema and read

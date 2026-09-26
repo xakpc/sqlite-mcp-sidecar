@@ -26,8 +26,8 @@ flowchart TD
     sandbox -->|fail| e4[QueryRejected]
 ```
 
-- **Bearer token** — one token for each deployment. See [authentication-and-network.md](authentication-and-network.md).
-- **Permissions** — they decide which tools exist. See [permission-model.md](permission-model.md).
+- **Bearer token** — one token for each deployment. See [../../security/authentication.md](../../security/authentication.md).
+- **Permissions** — they decide which tools exist. See [../../security/permissions.md](../../security/permissions.md).
 - **Agent protections** — structured writes, mandatory predicate, mandatory `maxRows`, bounded pre-count, row-limit rollback, server row limit, write budget, mandatory idempotency key. See [structured-writes.md](structured-writes.md).
 - **SQLite sandbox** — authorizer, defensive mode, runtime limits, interrupt. See [sqlite-sandbox.md](sqlite-sandbox.md).
 
@@ -87,7 +87,7 @@ database have two independent budgets and two independent caches.
 
 ## Related
 
-- [permission-model.md](permission-model.md)
-- [authentication-and-network.md](authentication-and-network.md)
+- [../../security/permissions.md](../../security/permissions.md)
+- [../../security/authentication.md](../../security/authentication.md)
 - [sqlite-sandbox.md](sqlite-sandbox.md)
 - [threat-model.md](threat-model.md)

@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore Xakpc.SQLiteMCPSidecar.slnx
+
+      - name: Build
+        run: dotnet build Xakpc.SQLiteMCPSidecar.slnx --configuration Release --no-restore
+
+      # The sandbox depends on the native SQLite build, thus this Linux run is the one that proves
+      # the shipped behaviour. The container-targeted run joins it when the image lands.
+      - name: Test
+        run: dotnet test --solution Xakpc.SQLiteMCPSidecar.slnx --configuration Release --no-build

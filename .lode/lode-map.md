@@ -12,13 +12,15 @@ flowchart TD
     root --> p[practices.md]
     root --> m[lode-map.md]
     root --> cfg[configuration/]
-    root --> sec[security/]
+    root --> sec[security/ — summary, authentication, permissions, public-endpoint]
     root --> dbd[database/]
     root --> mcpd[mcp/]
     root --> tst[testing/]
     root --> dec[decisions/]
     root --> plans[plans/]
     root --> tmp[tmp/ — git-ignored]
+    dbd --> dbs[connections.md, sqlite-sandbox.md]
+    mcpd --> mcps[tool-catalog.md, query-results.md, error-model.md]
     plans --> rm[mvp-roadmap.md]
     plans --> rt[required-tests.md]
     plans --> oq[open-questions.md]
@@ -50,19 +52,23 @@ moves out of `plans/design/` when code implements it, and it is rewritten as cur
 | --- | --- |
 | [security/summary.md](security/summary.md) | The layers that have code today. |
 | [security/authentication.md](security/authentication.md) | The deployment token, the constant-time comparison, the permission claims, the identical 401, the health endpoint, the network model. |
+| [security/public-endpoint.md](security/public-endpoint.md) | The two paths and the path contract, the request budget, the middleware order, the absent host filtering, the forwarded address in a log. |
 | [security/permissions.md](security/permissions.md) | The six permissions, the read floor, the claim and policy mechanism, the two gating layers, the invariants, the risk table. |
 
 ## database/
 
 | File | Contents |
 | --- | --- |
-| [database/connections.md](database/connections.md) | The read-only connection, `query_only`, pooling off, the Phase 2 sandbox seam, the request semaphore, the filesystem constraints. |
+| [database/connections.md](database/connections.md) | The read-only connection, `query_only`, pooling off, where the sandbox applies, the request semaphore, the filesystem constraints. |
+| [database/sqlite-sandbox.md](database/sqlite-sandbox.md) | The always-on SQLite controls, the verified native API, the allowlist authorizer, runtime limits, the one-statement rule, hard boundaries, cancellation. |
 
 ## mcp/
 
 | File | Contents |
 | --- | --- |
-| [mcp/tool-catalog.md](mcp/tool-catalog.md) | The nine tools and which exist, server registration, the stateless transport and the removed handshake, tool shape, `schema`. |
+| [mcp/tool-catalog.md](mcp/tool-catalog.md) | The nine tools and which exist, server registration, the stateless transport and the removed handshake, tool shape, `schema`, `query`. |
+| [mcp/query-results.md](mcp/query-results.md) | The result pipeline, the `Toon.DotNet` serializer, output format, value handling, row and byte limits, truncation. |
+| [mcp/error-model.md](mcp/error-model.md) | The twelve codes, how a code reaches the agent, which reach a caller today, a selection flowchart, disclosure rules. |
 
 ## testing/
 
@@ -97,16 +103,14 @@ Target design for what has no code. One topic for each file.
 | File | Contents |
 | --- | --- |
 | [security-model.md](plans/design/security-model.md) | The layered security model, the guarantees list, the non-guarantees list. Start here. |
-| [sqlite-sandbox.md](plans/design/sqlite-sandbox.md) | The always-on SQLite controls, the verified native API surface, authorizer policy for each tool, runtime limits, hard boundaries, cancellation. |
 | [threat-model.md](plans/design/threat-model.md) | Agent mistakes, mitigation map, the mistake that the MVP does not mitigate, attacker goals and blocks, logging and errors as leak surfaces. |
 | [connection-policy.md](plans/design/connection-policy.md) | The write and backup connections, `BEGIN IMMEDIATE`, busy behaviour, the write and backup semaphores. |
 | [structured-writes.md](plans/design/structured-writes.md) | `insert`, `update`, `delete`, the filter model, the bounded pre-count, the row-limit rollback, the write budget. |
 | [write-idempotency.md](plans/design/write-idempotency.md) | The mandatory `requestId`, what the cache stores, why failures are not cached, the bounds. |
 | [raw-writes.md](plans/design/raw-writes.md) | `execute_write_sql`, what the permission bypasses and what it does not, results, budget accounting, no remote transactions. |
 | [backups.md](plans/design/backups.md) | The background backup, partial files, the runaway cap, `backup_status`, path safety, and the `diagnostics` tool. |
-| [toon-results.md](plans/design/toon-results.md) | The result pipeline, the `Toon.DotNet` serializer, output format, row and byte limits, truncation. |
-| [error-model.md](plans/design/error-model.md) | The twelve error codes, which reach a caller today, a selection flowchart, disclosure rules. |
 | [container-and-deployment.md](plans/design/container-and-deployment.md) | Deployment shape, compose example, filesystem access, image hardening, current Dockerfile gaps, build output. |
+| [platform-deployment.md](plans/design/platform-deployment.md) | Kamal and Coolify recipes, the proxy path options, the healthcheck path, replicas, the client header, token rotation. |
 
 ## tmp/
 
@@ -120,9 +124,10 @@ documents go here.
 | Start a session | `lode-map.md`, `terminology.md`, `summary.md` |
 | Continue implementation | `plans/mvp-roadmap.md`, `practices.md` |
 | Write or run a test | `testing/e2e-harness.md`, `plans/required-tests.md` |
-| Touch SQLite access | `database/connections.md`, `plans/design/sqlite-sandbox.md`, `plans/design/connection-policy.md` |
-| Add or change a tool | `mcp/tool-catalog.md`, `security/permissions.md` |
+| Touch SQLite access | `database/sqlite-sandbox.md`, `database/connections.md`, `plans/design/connection-policy.md` |
+| Add or change a tool | `mcp/tool-catalog.md`, `security/permissions.md`, `mcp/error-model.md` |
 | Touch authentication | `security/authentication.md`, `security/permissions.md` |
+| Touch an endpoint, a path or a rate limit | `security/public-endpoint.md`, `plans/design/platform-deployment.md` |
 | Touch configuration | `configuration/options.md` |
 | Touch a write path | `plans/design/structured-writes.md`, `plans/design/write-idempotency.md`, `plans/design/raw-writes.md` |
 | Write documentation | `plans/design/security-model.md`, `security/permissions.md`, `plans/design/raw-writes.md`, `decisions/` |

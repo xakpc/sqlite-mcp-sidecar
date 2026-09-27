@@ -25,8 +25,7 @@ public string ReadOnlyConnectionString =>
 ```mermaid
 flowchart TD
     open[Open, Mode is ReadOnly, Pooling is false] --> qo[PRAGMA query_only=ON]
-    qo --> seam[Phase 2 seam: SqliteSecurity.ApplyBaseline]
-    seam --> exec[Execute the server statement]
+    qo --> exec[Execute the server statement, or install the sandbox for caller SQL]
     exec --> close[Close the connection]
 ```
 
@@ -45,19 +44,15 @@ A pooled handle keeps its state, including an authorizer from an earlier operati
 privilege-escalation path: a read connection could inherit a write authorizer. `Pooling=false`
 removes the whole class of residual-state defects. Record a measured cost before any change.
 
-## The Phase 2 seam
+## The sandbox on this connection
 
-`OpenReadOnlyAsync` holds this comment:
+`OpenReadOnlyAsync` calls `SqliteSecurity.ApplyBaseline` immediately after `Open`: defensive mode,
+trusted schema off, the runtime limits and no attached databases. The baseline applies to every
+connection, also to the one that `schema` uses, because these settings live on the handle.
 
-```csharp
-// TODO Phase 2: SqliteSecurity.ApplyBaseline(connection, AuthorizerPolicy.Read);
-```
-
-The baseline belongs on every connection that caller input reaches: defensive mode, trusted schema
-off, runtime limits, the authorizer and the interrupt registration. No tool accepts caller SQL yet,
-and `schema` runs one server-authored statement, thus the baseline is not yet necessary for safety.
-It becomes mandatory with the `query` tool. See
-[../plans/design/sqlite-sandbox.md](../plans/design/sqlite-sandbox.md).
+The authorizer and the interrupt are **not** installed here. `ReadJournalModeAsync` and
+`ReadSchemaDdlAsync` are server-authored, and the read policy rejects `PRAGMA`. The caller that runs
+caller SQL installs them, which is `QueryAsync`. See [sqlite-sandbox.md](sqlite-sandbox.md).
 
 ## Concurrency
 
@@ -95,5 +90,5 @@ writes it. See [../configuration/options.md](../configuration/options.md).
 ## Related
 
 - [../plans/design/connection-policy.md](../plans/design/connection-policy.md) — the write paths
-- [../plans/design/sqlite-sandbox.md](../plans/design/sqlite-sandbox.md)
+- [sqlite-sandbox.md](sqlite-sandbox.md)
 - [../mcp/tool-catalog.md](../mcp/tool-catalog.md)

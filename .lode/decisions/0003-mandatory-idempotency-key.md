@@ -35,4 +35,4 @@ instructions.
 ## Related
 
 - [../plans/design/write-idempotency.md](../plans/design/write-idempotency.md)
-- [../plans/design/error-model.md](../plans/design/error-model.md)
+- [../mcp/error-model.md](../mcp/error-model.md)

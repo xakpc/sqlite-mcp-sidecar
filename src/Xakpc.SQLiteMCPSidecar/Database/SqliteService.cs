@@ -52,12 +52,16 @@ public sealed class SqliteService : IDisposable
         {
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            // TODO Phase 2: SqliteSecurity.ApplyBaseline(connection, AuthorizerPolicy.Read);
-            // The baseline belongs on every connection that caller input reaches. No tool accepts
-            // caller SQL yet, thus only the query_only block is in place.
+            // Defensive mode, trusted schema off, the runtime limits and no attached databases.
+            // The baseline belongs on every connection, and it applies after every Open: these
+            // settings live on the handle and not on the process.
+            SqliteSecurity.ApplyBaseline(connection, _options);
 
             // A second, independent block next to the read-only open mode. The two mechanisms fail
             // in different ways, thus both stay.
+            //
+            // This is a server-authored statement, thus it runs before any authorizer is installed.
+            // Each policy rejects PRAGMA. The caller of this method installs the authorizer.
             await using var pragma = connection.CreateCommand();
             pragma.CommandText = "PRAGMA query_only=ON;";
             await pragma.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -69,6 +73,48 @@ public sealed class SqliteService : IDisposable
             await connection.DisposeAsync().ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Runs one caller-supplied read statement inside the sandbox and returns a bounded result.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The order matters. The baseline applies on <c>Open</c>, the server statement runs next, and
+    /// the authorizer is installed only after that. The disposal order is the reverse, thus the
+    /// authorizer and the progress handler are gone before the handle closes.
+    /// </para>
+    /// <para>
+    /// The timeout interrupts SQLite itself. A command timeout would only abandon the caller and
+    /// leave the statement running against the owning application.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="StatementRejectedException">
+    /// The text is not exactly one statement, or the authorizer rejected it.
+    /// </exception>
+    public async Task<QueryResult> QueryAsync(string sql, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(_options.QueryTimeoutSeconds));
+        var token = timeout.Token;
+
+        await using var connection = await OpenReadOnlyAsync(token).ConfigureAwait(false);
+        using var interrupt = SqliteSecurity.RegisterInterrupt(connection, token);
+        using var authorizer = SqliteSecurity.InstallAuthorizer(connection, AuthorizerPolicy.Read);
+
+        var check = SqliteSecurity.ValidateSingleStatement(connection, sql);
+        if (check != StatementCheck.Ok)
+        {
+            throw new StatementRejectedException(check);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+
+        await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+        return await QueryResult.ReadAsync(reader, _options, token).ConfigureAwait(false);
     }
 
     /// <summary>

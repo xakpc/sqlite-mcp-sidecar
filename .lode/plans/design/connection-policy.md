@@ -67,6 +67,6 @@ backup request fails immediately instead of a wait. See [backups.md](backups.md)
 ## Related
 
 - [../../database/connections.md](../../database/connections.md) — current state
-- [sqlite-sandbox.md](sqlite-sandbox.md)
+- [sqlite-sandbox.md](../../database/sqlite-sandbox.md)
 - [structured-writes.md](structured-writes.md)
 - [backups.md](backups.md)

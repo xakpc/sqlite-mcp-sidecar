@@ -1,12 +1,17 @@
 # Threat model
 
-> **Status: planned.** This file records target design. No code implements it yet.
-> Current state is in [../../summary.md](../../summary.md). Sequence is in [../mvp-roadmap.md](../mvp-roadmap.md).
+> **Status: partly implemented.** The read-path mitigations have code: the sandbox, the row and byte
+> limits, the timeout with the interrupt, the concurrency semaphore and the disclosure rules. See
+> [../../database/sqlite-sandbox.md](../../database/sqlite-sandbox.md) and
+> [../../mcp/query-results.md](../../mcp/query-results.md). Each write mitigation is still target
+> design. Sequence is in [../mvp-roadmap.md](../mvp-roadmap.md).
 
 The sidecar defends against two callers. The second one is unusual and it drives most of the
 product design.
 
-1. An **unauthorized client**. The bearer token stops it.
+1. An **unauthorized client**. The bearer token stops it. The endpoint can be public, thus this
+   caller can also be an unknown internet client that sends many requests. The request budget bounds
+   it. See [../../security/public-endpoint.md](../../security/public-endpoint.md).
 2. An **authorized but mistaken agent**. The agent protections stop it.
 
 ## Agent mistakes
@@ -36,9 +41,10 @@ flowchart TD
     m1 --> c5[Row-limit rollback]
     m2[Repeated small destruction] --> c6[Write-rate budget]
     m3[Retry after a lost response] --> c7[Mandatory requestId]
-    m4[Expensive query] --> c8[VDBE op limit]
-    m4 --> c9[Query timeout and interrupt]
+    m4[Expensive query] --> c8[Query timeout and sqlite3_interrupt]
+    m4 --> c9[Progress handler, the second stop path]
     m4 --> c10[Concurrency semaphore]
+    m4 --> c8b[VDBE op limit: statement complexity only]
     m5[Huge result] --> c11[Row limit]
     m5 --> c12[Result byte limit]
     m6[Schema change] --> c13[Authorizer rejects DDL]
@@ -75,10 +81,13 @@ MVP has no restore tool, no scheduled backup and no automatic backup before a de
 | Execute native code | Extension loading is never on. |
 | Damage the schema | Defensive mode, trusted schema off, DDL rejected. |
 | Break the owning application | No `journal_mode` change. No `locking_mode` change. No DDL. |
-| Empty the host resources | Row, byte, time, VDBE and concurrency limits. |
+| Empty the host resources | Row, byte, time and concurrency limits. The VDBE limit bounds statement complexity and not runtime, thus the timeout and the interrupt stop a runaway query. |
 | Fill the disk with backups | One backup at a time. The runaway cap stops a long copy. |
 | Empty the process memory | The idempotency cache has a bounded entry count and a bounded key length. |
 | Hold a lock forever | Finite busy timeout. `DatabaseBusy` and no unlimited wait. |
+| Send many requests from the internet | The request budget, `MAX_REQUESTS_PER_MINUTE`, one window for the process. |
+| Fill the log with rejected tokens | The budget runs before authentication, thus a rejected request also uses a permit. |
+| Guess the token | 32 bytes at least from `RandomNumberGenerator`, and a constant-time comparison. The budget also bounds the attempt rate. |
 | Make a read session into a write session | Read connections open `ReadOnly` with `query_only=ON`. |
 
 ## Logging as a leak surface
@@ -107,7 +116,7 @@ Log fields for each operation:
 | Backup | `backupName`, `size`, `duration`, `outcome` |
 
 The `limitCheck` field states which check rejected a write, `precount` or `postexecution`.
-The agent does not receive that detail. See [error-model.md](error-model.md).
+The agent does not receive that detail. See [error-model.md](../../mcp/error-model.md).
 
 The raw-write log has no table field, because one raw statement can touch several tables. The
 `sqlHash` value correlates repeated statements and it keeps no record of the data.
@@ -118,7 +127,7 @@ response. Use the backup name to correlate.
 ## Error responses as a leak surface
 
 Return a code from the small error model. Do not return a stack trace, a secret, a filesystem
-path or a SQLite internal message that names a file. See [error-model.md](error-model.md).
+path or a SQLite internal message that names a file. See [error-model.md](../../mcp/error-model.md).
 
 ## Out of scope
 
@@ -129,10 +138,16 @@ The sidecar does not defend against these threats:
 - A correct but unwanted write or delete inside the configured limits. The MVP has no undo.
 - A second sidecar process against the same database. The write budget and the idempotency cache are per process, and nothing enforces one process.
 - Traffic interception when an operator sends plaintext HTTP to an untrusted network.
+- A network-volume attack. The request budget protects the database and the log, not the link. A
+  volume attack needs a defence in front of the proxy.
+- One agent that uses the whole request budget and stops another agent. The budget has no partition,
+  because the deployment has one identity. See [../out-of-scope.md](../out-of-scope.md).
+- A stolen token. There is no expiry and no revocation list. A rotation is a secret change and a
+  restart. See [platform-deployment.md](platform-deployment.md).
 - A network-mounted database file. NFS and SMB are outside the supported deployment model, because SQLite locking is unreliable there.
 
 ## Related
 
 - [security-model.md](security-model.md)
-- [sqlite-sandbox.md](sqlite-sandbox.md)
+- [sqlite-sandbox.md](../../database/sqlite-sandbox.md)
 - [structured-writes.md](structured-writes.md)

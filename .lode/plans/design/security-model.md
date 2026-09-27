@@ -1,7 +1,9 @@
 # Security summary
 
-> **Status: planned.** This file records target design. No code implements it yet.
-> Current state is in [../../summary.md](../../summary.md). Sequence is in [../mvp-roadmap.md](../mvp-roadmap.md).
+> **Status: partly implemented.** The authentication, permission, sandbox and result layers have
+> code. The write layers do not. Current state is in [../../summary.md](../../summary.md) and in
+> [../../database/sqlite-sandbox.md](../../database/sqlite-sandbox.md). Sequence is in
+> [../mvp-roadmap.md](../mvp-roadmap.md).
 
 The sidecar is a security boundary between an AI agent and a live application database. It
 defends against two different callers: an unauthorized client, and an authorized client that
@@ -13,23 +15,26 @@ Each request passes each layer in order. A layer never becomes optional.
 
 ```mermaid
 flowchart TD
-    req[MCP request] --> auth[Bearer token check]
+    req[MCP request] --> budget[Request budget]
+    budget --> auth[Bearer token check]
     auth --> perm[Deployment permission check]
     perm --> conc[Concurrency semaphore]
     conc --> agent[Agent protections]
     agent --> sandbox[SQLite sandbox]
     sandbox --> sqlite[(app.db)]
 
+    budget -->|fail| e0[429 Too Many Requests]
     auth -->|fail| e1[Unauthorized]
     perm -->|fail| e2[PermissionDenied]
     agent -->|fail| e3[WriteLimitExceeded / WriteBudgetExceeded]
     sandbox -->|fail| e4[QueryRejected]
 ```
 
+- **Request budget** — one fixed window for each process, before authentication. See [../../security/public-endpoint.md](../../security/public-endpoint.md).
 - **Bearer token** — one token for each deployment. See [../../security/authentication.md](../../security/authentication.md).
 - **Permissions** — they decide which tools exist. See [../../security/permissions.md](../../security/permissions.md).
 - **Agent protections** — structured writes, mandatory predicate, mandatory `maxRows`, bounded pre-count, row-limit rollback, server row limit, write budget, mandatory idempotency key. See [structured-writes.md](structured-writes.md).
-- **SQLite sandbox** — authorizer, defensive mode, runtime limits, interrupt. See [sqlite-sandbox.md](sqlite-sandbox.md).
+- **SQLite sandbox** — authorizer, defensive mode, runtime limits, interrupt. See [sqlite-sandbox.md](../../database/sqlite-sandbox.md).
 
 The agent protections layer is the only layer that `danger-raw-write` makes weaker, and it
 keeps the idempotency key and the write budget. The sandbox layer stays intact. See
@@ -89,5 +94,5 @@ database have two independent budgets and two independent caches.
 
 - [../../security/permissions.md](../../security/permissions.md)
 - [../../security/authentication.md](../../security/authentication.md)
-- [sqlite-sandbox.md](sqlite-sandbox.md)
+- [sqlite-sandbox.md](../../database/sqlite-sandbox.md)
 - [threat-model.md](threat-model.md)

@@ -6,7 +6,7 @@ decisions are in [open-questions.md](open-questions.md).
 
 ## Current state
 
-Phase 0 and Phase 1 are done, and the `schema` tool of Phase 3 came with them. See
+Phase 0 to Phase 3 are done. Phase 2 and Phase 3 shipped together. See
 [../summary.md](../summary.md) for the status table.
 
 ## Sequence
@@ -14,9 +14,8 @@ Phase 0 and Phase 1 are done, and the `schema` tool of Phase 3 came with them. S
 ```mermaid
 flowchart TD
     p0[Phase 0: strip the template — done] --> p1[Phase 1: configuration and auth — done]
-    p1 --> p2[Phase 2: SQLite sandbox]
-    p2 --> p3[Phase 3: query and TOON. schema is done]
-    p3 --> p4[Phase 4: structured writes]
+    p1 --> p23[Phase 2+3: sandbox, query and TOON — done]
+    p23 --> p4[Phase 4: structured writes]
     p4 --> p5[Phase 5: backup and diagnostics]
     p5 --> p6[Phase 6: danger-raw-write]
     p6 --> p7[Phase 7: container and docs]
@@ -28,7 +27,12 @@ phase ships an unprotected query path. `danger-raw-write` lands last, thus the s
 is complete and proven first.
 
 `schema` is outside that order and it does not break the rule: it runs a server-authored statement
-and it takes no caller input. Each tool that runs caller SQL still waits for the sandbox.
+and it takes no caller input.
+
+**Lesson.** Phase 2 and Phase 3 could not ship apart. Phase 2 asked that each hard boundary fail
+remotely, and every test goes through `SidecarHarness`, thus proving a boundary needs a tool that
+takes caller SQL. The alternatives were a throwaway raw-SQL tool in the production binary, or unit
+tests that the external target never runs. Both were worse than one larger phase.
 
 ### Phase 0 — strip the template. Done
 
@@ -40,7 +44,8 @@ The template sample, the OpenAPI reference and the HTTPS redirection are gone. T
 
 Current state: [../configuration/options.md](../configuration/options.md),
 [../security/authentication.md](../security/authentication.md),
-[../security/permissions.md](../security/permissions.md).
+[../security/permissions.md](../security/permissions.md),
+[../security/public-endpoint.md](../security/public-endpoint.md).
 
 A wrong token returns `401`, an absent token or database fails startup, and a write permission
 without the read floor fails startup with a message that names the missing permission. The startup
@@ -50,28 +55,35 @@ The phase also landed the MCP endpoint, the `schema` tool and the test harness. 
 [../mcp/tool-catalog.md](../mcp/tool-catalog.md) and
 [../testing/e2e-harness.md](../testing/e2e-harness.md).
 
-### Phase 2 — SQLite sandbox
+The endpoint is ready for a public proxy: the path is the whole public path, the request budget is
+active, and the sidecar does no host filtering. `RateLimitTests` proves the budget.
 
-This is the foundation phase. See [design/sqlite-sandbox.md](design/sqlite-sandbox.md).
+### Phase 2 and Phase 3 — sandbox, `query` and TOON. Done
 
-- `Database/SqliteSecurity.cs` applies the baseline after each `Open`: defensive mode, trusted schema off, runtime limits, busy timeout.
-- Per-operation authorizer policies.
-- `sqlite3_interrupt` on the cancellation token.
-- The read-write connection factory. The read-only one exists: see [../database/connections.md](../database/connections.md) and [design/connection-policy.md](design/connection-policy.md).
-- The write semaphore and the backup semaphore. The request semaphore exists.
+Current state: [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md),
+[../mcp/query-results.md](../mcp/query-results.md),
+[../mcp/error-model.md](../mcp/error-model.md),
+[../mcp/tool-catalog.md](../mcp/tool-catalog.md).
 
-Done when: each statement of the hard-boundary list in [required-tests.md](required-tests.md) fails
-remotely, with no tool registered except a test harness.
+`Database/SqliteSecurity.cs` holds the baseline, an allowlist authorizer, the runtime limits, the
+interrupt and the one-statement check. `Database/QueryResult.cs` holds the bounded read and the TOON
+encoding. The `query` tool runs one caller statement inside that sandbox.
 
-### Phase 3 — query and TOON
+Each statement of the hard-boundary list in [required-tests.md](required-tests.md) fails remotely
+through `query`, an agent reads the schema and queries while the owning application writes, and a
+runaway query stops at the timeout.
 
-- `schema` is done. See [../mcp/tool-catalog.md](../mcp/tool-catalog.md).
-- `query` tool, one statement, read-only connection plus `PRAGMA query_only=ON`.
-- TOON serialization with the row counter and the byte counter. See [design/toon-results.md](design/toon-results.md).
-- The error model. See [design/error-model.md](design/error-model.md).
-- Read logging, with no parameter values and no SQL text.
+Scope stayed on the read path. These items moved to the phase that gives them a caller, thus the
+codebase holds no uncalled code:
 
-Done when: an agent inspects the schema and runs a query while the owning application writes.
+| Item | Phase |
+| --- | --- |
+| The read-write connection factory | 4 |
+| The write semaphore | 4 |
+| The backup semaphore | 5 |
+| The write and DML authorizer policies | 4 and 6 |
+
+Their design stays in [design/connection-policy.md](design/connection-policy.md).
 
 ### Phase 4 — structured writes
 
@@ -102,7 +114,8 @@ destination path, and a stopped backup leaves no file without the partial suffix
 ### Phase 6 — danger-raw-write
 
 - `execute_write_sql` behind the permission. See [design/raw-writes.md](design/raw-writes.md).
-- The DML authorizer policy.
+- The DML authorizer policy in `Database/SqliteSecurity.cs`, as a second `AuthorizerPolicy` value.
+- Run the `SandboxBoundaryTests` list again through `execute_write_sql`. Each hard boundary must still fail.
 - Mandatory `requestId`, and write budget accounting after execution.
 - `RETURNING` results through the same TOON path.
 - `sqlHash` logging.
@@ -113,10 +126,11 @@ boundary still fails.
 ### Phase 7 — container and documentation
 
 - Rework the Dockerfile. See [design/container-and-deployment.md](design/container-and-deployment.md).
+- Write the Kamal and Coolify recipes, and state the path contract in the README: the proxy must **not** strip the `/db` prefix. See [design/platform-deployment.md](design/platform-deployment.md).
 - Add the container launch configuration back: a `compose.yaml` and a container launch profile. The template profile is gone, because it mounts no database and it opens an HTTPS port. See [design/container-and-deployment.md](design/container-and-deployment.md).
 - Point the e2e suite at the container and add that run to CI. This satisfies the rule that the functional suite runs against the published Linux artifact. See [../testing/e2e-harness.md](../testing/e2e-harness.md).
 - `README.md` with the permission risk table, the whole-database write statement and the one-sidecar rule.
-- `SECURITY.md` with the required `danger-raw-write` statement, the no-undo statement and the budget-throttle statement.
+- `SECURITY.md` with the required `danger-raw-write` statement, the no-undo statement, the budget-throttle statement, the one-token rotation limit and the rule that the container port never faces the internet. See [../security/public-endpoint.md](../security/public-endpoint.md).
 - `LICENSE`, Apache-2.0.
 
 Done when: the image runs as non-root over a mounted database, `docker compose up` gives a working
@@ -133,7 +147,8 @@ The mandatory lists live in [required-tests.md](required-tests.md): the hard-bou
 startup cases, the structured write cases, the idempotency cases, the raw write cases and the
 functional cases. Security tests are mandatory, not optional.
 
-The startup list is complete and it runs in `StartupTests`. Each remaining list belongs to the phase
+The startup list and the hard-boundary list are complete, in `StartupTests` and in
+`SandboxBoundaryTests`. Each remaining list belongs to the phase
 that builds its feature.
 
 ## Definition of done

@@ -19,11 +19,13 @@ Findings from package inspection:
 
 - `Microsoft.Data.Sqlite` 10.0.12 with the bundled native SQLite operates under AOT.
 - `ModelContextProtocol.Core` 2.2.0 has one `RequiresUnreferencedCode` annotation. Assembly scanning is the probable site, thus explicit `WithTools<T>()` registration prevents it. Tool schema generation from method signatures still uses reflection, and that is the real risk.
-- `Toon.DotNet` 4.1.1 declares no `RequiresUnreferencedCode` and no `RequiresDynamicCode`. An absent annotation is not proof of AOT safety. The `Toon.Encode(object, ...)` path reflects over the argument type. The `DataTable` overload prevents that.
+- `Toon.DotNet` 4.1.1 declares no `RequiresUnreferencedCode` and no `RequiresDynamicCode`. An absent annotation is not proof of AOT safety. **Settled:** the result pipeline uses the `DataTable` overload, thus nothing reflects over the argument type. See [../mcp/query-results.md](../mcp/query-results.md).
 
-**Recommendation.** Attempt AOT. Prefer the `DataTable` shape for results. Do not change the
-architecture to get AOT. Decide with a real `dotnet publish -r linux-x64` run, not from
-annotations.
+The sandbox adds native callbacks, `delegate_authorizer` and `delegate_progress`. The production
+project builds with no IL warning today, and that is the check to repeat before the publish attempt.
+
+**Recommendation.** Attempt AOT. Do not change the architecture to get AOT. Decide with a real
+`dotnet publish -r linux-x64` run, not from annotations.
 
 ## 2. Minimal container base image
 

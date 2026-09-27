@@ -12,25 +12,32 @@ Linux OCI image under Apache-2.0.
 
 ## Implementation status
 
-The foundation works end to end: configuration, startup validation, token authentication,
-permission gating, the stateless MCP endpoint, a read-only SQLite connection, the `schema` tool,
-and a dual-target end-to-end test harness.
+The read half of the product works end to end: configuration, startup validation, token
+authentication, permission gating, the stateless MCP endpoint at `/db/mcp`, the request budget, the
+always-on SQLite sandbox, the `schema` and `query` tools, TOON results, and a dual-target end-to-end
+test harness.
 
 | Area | State |
 | --- | --- |
 | Configuration and startup validation | Implemented — [configuration/options.md](configuration/options.md) |
 | Authentication and the health endpoint | Implemented — [security/authentication.md](security/authentication.md) |
+| Public endpoint: paths and the request budget | Implemented — [security/public-endpoint.md](security/public-endpoint.md) |
 | Permissions and tool gating | Implemented — [security/permissions.md](security/permissions.md) |
-| MCP endpoint and the `schema` tool | Implemented — [mcp/tool-catalog.md](mcp/tool-catalog.md) |
+| MCP endpoint, `schema` and `query` | Implemented — [mcp/tool-catalog.md](mcp/tool-catalog.md) |
 | Read-only connection | Implemented — [database/connections.md](database/connections.md) |
+| SQLite sandbox | Implemented — [database/sqlite-sandbox.md](database/sqlite-sandbox.md) |
+| TOON results and limits | Implemented — [mcp/query-results.md](mcp/query-results.md) |
+| Error model, read path | Implemented — [mcp/error-model.md](mcp/error-model.md) |
 | Test harness | Implemented — [testing/e2e-harness.md](testing/e2e-harness.md) |
-| SQLite sandbox | Not started — Phase 2 |
-| `query` and TOON | Not started — Phase 3 |
 | Structured writes | Not started — Phase 4 |
 | Backup and diagnostics | Not started — Phase 5 |
 | `danger-raw-write` | Not started — Phase 6 |
 | Container and documentation | Not started — Phase 7 |
 | NativeAOT | Analyzers on. The publish attempt is Phase 8 |
+
+**The hard boundaries are proven on Windows only.** The sandbox depends on the native SQLite build,
+thus the boundary suite is fully proven when Phase 7 points the external target at the Linux
+container. See [testing/e2e-harness.md](testing/e2e-harness.md).
 
 The remaining design lives under [plans/design/](plans/design/), and each file there carries a
 status banner. Content moves out of `plans/design/` into a domain directory when code implements it.
@@ -45,19 +52,21 @@ global.json                        # selects the Microsoft.Testing.Platform test
 scripts/
     seed-dev-db.ps1                # builds build/dev/app.db, run it before the first launch
     dev-sidecar.ps1                # a live sidecar with any permission set
+    token.cs                       # asks for a deployment shape, mints the token and the env block
 src/Xakpc.SQLiteMCPSidecar/
     Program.cs
     mcp.http                       # manual MCP requests
     Dockerfile                     # still the Visual Studio template, Phase 7
     Properties/launchSettings.json # one profile for each deployment shape
     Configuration/                 SidecarOptions.cs, SidecarStartup.cs
-    Database/                      SqliteService.cs
-    Mcp/                           SqliteTools.cs, SidecarError.cs
+    Database/                      SqliteService.cs, SqliteSecurity.cs, QueryResult.cs
+    Mcp/                           SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs
     Security/                      PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs
 test/Xakpc.SQLiteMCPSidecar.Tests/
     Harness/                       SidecarHarness.cs
     Fixtures/                      sample-db.sql, SampleDatabase.cs, DevDatabaseTests.cs
     StartupTests.cs, AuthTests.cs, PermissionGatingTests.cs, SchemaToolTests.cs
+    SandboxBoundaryTests.cs, QueryToolTests.cs, RateLimitTests.cs
 sqlite-sidecar-mcp — Design Document.md
 ```
 
@@ -86,7 +95,7 @@ schema   query   insert   update   delete
 backup   backup_status   diagnostics   execute_write_sql
 ```
 
-`schema` exists. The permission set decides which tools exist. See
+`schema` and `query` exist. The permission set decides which tools exist. See
 [mcp/tool-catalog.md](mcp/tool-catalog.md).
 
 ## Context
@@ -111,10 +120,12 @@ dotnet test --solution Xakpc.SQLiteMCPSidecar.slnx   # the whole suite
 ./scripts/seed-dev-db.ps1                            # one time, before the first launch
 # then F5 on a launch profile, or:
 ./scripts/dev-sidecar.ps1                            # a live sidecar on port 8080
+
+dotnet run scripts/token.cs                          # a real deployment token and its env block
 ```
 
-Each launch profile and the script serve `http://localhost:8080` with the token `dev-token`, thus
-`src/Xakpc.SQLiteMCPSidecar/mcp.http` calls any of them with no change.
+Each launch profile and the script serve `http://localhost:8080/db/mcp` with the token `dev-token`,
+thus `src/Xakpc.SQLiteMCPSidecar/mcp.http` calls any of them with no change.
 
 See [testing/e2e-harness.md](testing/e2e-harness.md).
 
@@ -126,3 +137,4 @@ See [testing/e2e-harness.md](testing/e2e-harness.md).
 - [decisions/](decisions/) — decisions that are difficult to reverse.
 - [plans/mvp-roadmap.md](plans/mvp-roadmap.md) — the phased plan.
 - [plans/design/security-model.md](plans/design/security-model.md) — the security model.
+- [database/sqlite-sandbox.md](database/sqlite-sandbox.md) — the always-on SQLite controls.

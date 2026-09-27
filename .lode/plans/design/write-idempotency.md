@@ -57,7 +57,7 @@ committed. Each other result executes again on a retry.
 
 **Invariant.** Do not cache a failure. `DatabaseBusy` and `WriteBudgetExceeded` tell the agent
 to retry later. A cached failure makes that retry impossible for the full window, thus the
-error model would give false instructions. See [error-model.md](error-model.md).
+error model would give false instructions. See [error-model.md](../../mcp/error-model.md).
 
 **Detect a different payload.** Store a hash of the normalized request together with the
 response. A repeated `requestId` with a different hash is `InvalidWrite`. Do not return the
@@ -99,5 +99,5 @@ flowchart LR
 
 - [structured-writes.md](structured-writes.md)
 - [raw-writes.md](raw-writes.md)
-- [error-model.md](error-model.md)
+- [error-model.md](../../mcp/error-model.md)
 - [../../decisions/0003-mandatory-idempotency-key.md](../../decisions/0003-mandatory-idempotency-key.md)

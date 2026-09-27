@@ -4,7 +4,6 @@
 # The transport is stateless: the 2026-07-28 protocol revision removed the Mcp-Session-Id header
 # (SEP-2567) and the initialize handshake (SEP-2575). Every request below is therefore
 # self-contained, and there is no session id to copy from one request to the next.
-
 @host = http://localhost:8080
 @token = dev-token
 
@@ -12,14 +11,14 @@
 GET {{host}}/health
 
 ### No Authorization header. Expect 401 with a bare "Bearer" challenge.
-POST {{host}}/mcp
+POST {{host}}/db/mcp
 Content-Type: application/json
 Accept: application/json, text/event-stream
 
 {"jsonrpc":"2.0","id":1,"method":"tools/list"}
 
 ### A wrong token. Expect the same 401: the answer does not state which check failed.
-POST {{host}}/mcp
+POST {{host}}/db/mcp
 Authorization: Bearer not-the-token
 Content-Type: application/json
 Accept: application/json, text/event-stream
@@ -27,7 +26,7 @@ Accept: application/json, text/event-stream
 {"jsonrpc":"2.0","id":1,"method":"tools/list"}
 
 ### The tool list. It holds the permitted tools only.
-POST {{host}}/mcp
+POST {{host}}/db/mcp
 Authorization: Bearer {{token}}
 Content-Type: application/json
 Accept: application/json, text/event-stream
@@ -35,16 +34,40 @@ Accept: application/json, text/event-stream
 {"jsonrpc":"2.0","id":1,"method":"tools/list"}
 
 ### The schema tool. It returns DDL text and no row data.
-POST {{host}}/mcp
+POST {{host}}/db/mcp
 Authorization: Bearer {{token}}
 Content-Type: application/json
 Accept: application/json, text/event-stream
 
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"schema","arguments":{}}}
 
+### The query tool. Rows come back as TOON, with the truncated flag.
+POST {{host}}/db/mcp
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"query","arguments":{"sql":"SELECT id, status, retry FROM jobs ORDER BY id"}}}
+
+### A hard boundary. Expect isError with "QueryRejected", and no filesystem path in the text.
+POST {{host}}/db/mcp
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"query","arguments":{"sql":"ATTACH DATABASE '/tmp/x.db' AS x"}}}
+
+### Two statements in one request. Expect isError with "InvalidQuery".
+POST {{host}}/db/mcp
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"query","arguments":{"sql":"SELECT 1; DROP TABLE jobs"}}}
+
 ### A tool that the permission set does not cover. Start the sidecar with -Permissions read, then
 ### expect a forbidden answer although the name is correct.
-POST {{host}}/mcp
+POST {{host}}/db/mcp
 Authorization: Bearer {{token}}
 Content-Type: application/json
 Accept: application/json, text/event-stream
@@ -53,7 +76,7 @@ Accept: application/json, text/event-stream
 
 ### The initialize handshake. A client on the 2025-11-25 revision or earlier sends it. The server
 ### answers it, and the tool requests above work without it.
-POST {{host}}/mcp
+POST {{host}}/db/mcp
 Authorization: Bearer {{token}}
 Content-Type: application/json
 Accept: application/json, text/event-stream

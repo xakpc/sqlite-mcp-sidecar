@@ -1,14 +1,15 @@
 # MCP tool catalog
 
-The sidecar has one MCP endpoint at `/mcp` over Streamable HTTP. The catalog has nine tools at most,
-and one of them exists.
+The sidecar has one MCP endpoint at `/db/mcp` over Streamable HTTP. The catalog has nine tools at
+most, and two of them exist. The path is the whole public path on purpose. See
+[../security/public-endpoint.md](../security/public-endpoint.md).
 
 Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidecar/Program.cs`.
 
 | Tool | Permission | Caller supplies SQL | `requestId` | State |
 | --- | --- | --- | --- | --- |
 | `schema` | `schema` | no | no | **Implemented** |
-| `query` | `read` | yes, read-only | no | Phase 3 |
+| `query` | `read` | yes, read-only | no | **Implemented** |
 | `insert` | `write` | no | mandatory | Phase 4 |
 | `update` | `write` | no | mandatory | Phase 4 |
 | `delete` | `write` | no | mandatory | Phase 4 |
@@ -19,7 +20,7 @@ Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidec
 
 A permission that has no tool yet exposes nothing.
 `PermissionGatingTests.OnlyTheImplementedToolsAreExposed` starts a deployment with every permission
-and asserts that `tools/list` holds `schema` only.
+and asserts that `tools/list` holds `schema` and `query` only.
 
 ## Server registration
 
@@ -30,7 +31,9 @@ builder.Services
     .AddAuthorizationFilters()
     .WithTools<SqliteTools>();
 
-app.MapMcp("/mcp").RequireAuthorization();
+app.MapMcp(SidecarEndpoints.Mcp)
+    .RequireAuthorization()
+    .RequireRateLimiting(SidecarEndpoints.McpRateLimitPolicy);
 ```
 
 Register tools explicitly. `WithToolsFromAssembly` is annotated `RequiresUnreferencedCode`, which
@@ -64,7 +67,7 @@ obsolete. `SessionMode` is the fuller API, thus the code uses it.
 [McpServerTool(Name = "schema")]
 [Description("Return the DDL of every table, view and index in the database. ...")]
 [Authorize(Policy = "perm:schema")]
-public async Task<string> SchemaAsync(CancellationToken cancellationToken)
+public async Task<CallToolResult> SchemaAsync(CancellationToken cancellationToken)
 ```
 
 Every tool and every parameter needs a `[Description]`. That text is the only description the agent
@@ -72,10 +75,11 @@ reads, and a vague description is the main reason an agent misuses a tool. Name 
 the text. `PermissionGatingTests.EveryExposedToolCarriesADescription` asserts that each exposed tool
 has one.
 
-A failure reaches the caller as a code from
-[../plans/design/error-model.md](../plans/design/error-model.md) and a short fixed explanation. The
-detail goes to the log. A tool logs the name, the duration and the outcome through a
-source-generated `[LoggerMessage]` method.
+**A tool returns `CallToolResult` and never throws to report an error.** A failure reaches the caller
+as a result with `IsError` set, which carries a code from [error-model.md](error-model.md) and a
+short fixed explanation. The SDK masks a thrown exception, thus a throw loses the code. The detail
+goes to the log. A tool logs the name, the duration and the outcome through a source-generated
+`[LoggerMessage]` method.
 
 ## `schema`
 
@@ -112,9 +116,35 @@ reach the agent.
 This choice is cheap to reverse. A real agent must still confirm that the DDL output is usable. See
 [../plans/open-questions.md](../plans/open-questions.md).
 
+## `query`
+
+```csharp
+public async Task<CallToolResult> QueryAsync(
+    [Description("One read-only SQL statement, ...")] string sql,
+    CancellationToken cancellationToken)
+```
+
+One parameter, the SQL text. **There is no parameter list.** A caller that holds `read` can already
+write any `SELECT`, thus parameters would add surface with no security gain on the read path.
+
+The tool takes a request slot, then `SqliteService.QueryAsync` opens a read-only connection, applies
+the sandbox, proves that the text is one statement, executes it and bounds the result.
+
+```text
+rows[2]{id,status}:
+  41,failed
+  52,failed
+
+truncated: false
+```
+
+The rows are TOON. See [query-results.md](query-results.md). The rejections are in
+[../database/sqlite-sandbox.md](../database/sqlite-sandbox.md), and the codes are in
+[error-model.md](error-model.md).
+
 ## Related
 
 - [../security/permissions.md](../security/permissions.md)
 - [../database/connections.md](../database/connections.md)
 - [../testing/e2e-harness.md](../testing/e2e-harness.md)
-- [../plans/design/toon-results.md](../plans/design/toon-results.md)
+- [query-results.md](query-results.md)

@@ -1,3 +1,5 @@
+using ModelContextProtocol.Protocol;
+
 namespace Xakpc.SQLiteMCPSidecar.Mcp;
 
 /// <summary>
@@ -57,8 +59,24 @@ public static class SidecarErrors
     public static string Message(SidecarError code, string explanation) => $"{code}: {explanation}";
 
     /// <summary>
-    /// Throws the failure that the MCP layer turns into a tool error result.
+    /// Builds the tool result that carries one error code to the agent.
     /// </summary>
-    public static Exception Fail(SidecarError code, string explanation) =>
-        new InvalidOperationException(Message(code, explanation));
+    /// <remarks>
+    /// <b>Lesson.</b> A tool must return this result and must not throw. The SDK catches an
+    /// exception out of a tool and replaces the message with its own fixed text, <c>"An error
+    /// occurred invoking '&lt;tool&gt;'."</c>. That masking is right for an unexpected fault, and it
+    /// is wrong for the error model: the agent selects its next action from the code, and a masked
+    /// message gives it nothing to select from.
+    /// </remarks>
+    public static CallToolResult Failure(SidecarError code, string explanation) => new()
+    {
+        IsError = true,
+        Content = [new TextContentBlock { Text = Message(code, explanation) }],
+    };
+
+    /// <summary>Builds the tool result that carries a successful answer.</summary>
+    public static CallToolResult Success(string text) => new()
+    {
+        Content = [new TextContentBlock { Text = text }],
+    };
 }

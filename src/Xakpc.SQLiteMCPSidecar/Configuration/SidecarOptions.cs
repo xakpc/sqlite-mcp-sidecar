@@ -21,6 +21,7 @@ public sealed class SidecarOptions
     public int MaxConcurrency { get; init; } = 4;
     public int MaxWriteRows { get; init; } = 100;
     public int MaxWriteRowsPerMinute { get; init; } = 500;
+    public int MaxRequestsPerMinute { get; init; } = 120;
 
     /// <summary>
     /// Reads the <c>SQLITE_SIDECAR_</c> configuration and validates it.
@@ -100,6 +101,7 @@ public sealed class SidecarOptions
             MaxConcurrency = ReadPositiveInt(configuration, "MAX_CONCURRENCY", 4, 1, 1024, problems),
             MaxWriteRows = ReadPositiveInt(configuration, "MAX_WRITE_ROWS", 100, 1, 1_000_000, problems),
             MaxWriteRowsPerMinute = ReadPositiveInt(configuration, "MAX_WRITE_ROWS_PER_MINUTE", 500, 1, 10_000_000, problems),
+            MaxRequestsPerMinute = ReadPositiveInt(configuration, "MAX_REQUESTS_PER_MINUTE", 120, 1, 1_000_000, problems),
         };
 
         if (problems.Count > 0)

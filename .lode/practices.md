@@ -31,7 +31,7 @@ src/Xakpc.SQLiteMCPSidecar/
     Configuration/   SidecarOptions.cs, SidecarStartup.cs
     Database/        SqliteService.cs, and later SqliteSecurity.cs,
                      StructuredWriteBuilder.cs, BackupService.cs
-    Mcp/             SqliteTools.cs, SidecarError.cs
+    Mcp/             SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs
     Security/        PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs,
                      and later WriteBudget.cs, WriteDeduplication.cs
 ```
@@ -50,13 +50,23 @@ AOT-friendly and it needs no separate folder.
 ## Security practices
 
 - Use the native SQLite authorizer. Do not inspect SQL with regular expressions or string matching.
-- Apply the sandbox to every connection that untrusted input reaches. See [plans/design/sqlite-sandbox.md](plans/design/sqlite-sandbox.md).
+- Apply the sandbox to every connection that untrusted input reaches. See [database/sqlite-sandbox.md](database/sqlite-sandbox.md).
 - Parameterize every value. Validate every identifier against the live schema.
 - Accept exactly one SQL statement per raw request.
 - Start a write transaction with `BEGIN IMMEDIATE`, never with `BEGIN`. SQLite does not call the busy handler for a lock upgrade.
 - Give each write tool a mandatory `requestId`. Cache a committed response only. See [plans/design/write-idempotency.md](plans/design/write-idempotency.md).
 - Fail startup when required configuration is absent. Do not start in a degraded state.
 - Return a small error code. Do not return a stack trace, a secret or a filesystem path.
+- Give the MCP endpoint its whole public path, `/db/mcp`. Do not depend on a proxy to rewrite a
+  prefix. See [security/public-endpoint.md](security/public-endpoint.md).
+- Keep `app.UseRateLimiter()` before `app.UseAuthentication()`. A rejected token writes a log line,
+  thus the budget must also bound an unauthenticated flood.
+
+**Lesson.** `CreateSlimBuilder` adds **no** host-filtering middleware and **no** forwarded-headers
+middleware. An `AllowedHosts` value and `ASPNETCORE_FORWARDEDHEADERS_ENABLED` therefore do nothing
+in this application. Do not put a setting in the repository that reads as a control and runs no code.
+The reverse proxy is the host gate, and code that needs the caller address reads
+`X-Forwarded-For` itself and treats it as a claim.
 
 ## Logging practices
 
@@ -101,6 +111,15 @@ already the default as of the `2026-07-28` protocol revision.
 Permission gating is therefore an attribute on the tool method and never a hand-written check. See
 [security/permissions.md](security/permissions.md).
 
+**A tool returns `CallToolResult` and never throws to report an error.** The SDK catches an
+exception out of a tool and replaces the message with its own fixed text, `"An error occurred
+invoking '<tool>'."`. A thrown error therefore loses every code of the error model, and no build
+warning reports it. See [mcp/error-model.md](mcp/error-model.md).
+
+```csharp
+return SidecarErrors.Failure(SidecarError.QueryRejected, "The requested action is not permitted.");
+```
+
 Explicit registration has two reasons. It keeps the exposed tool set under permission
 control, and assembly scanning is annotated `RequiresUnreferencedCode`, which blocks
 NativeAOT. Every tool method and every parameter needs a `[Description]` attribute, because
@@ -112,9 +131,9 @@ Add a package only when it removes a meaningful amount of code.
 
 | Package | Version | Purpose |
 | --- | --- | --- |
-| `Microsoft.Data.Sqlite` | 10.0.12 | ADO.NET provider and bundled native SQLite. |
+| `Microsoft.Data.Sqlite` | 11.0.0-rc.1.26425.128 | ADO.NET provider and bundled native SQLite. |
 | `ModelContextProtocol.AspNetCore` | 2.2.0 | MCP server and Streamable HTTP transport. |
-| `Toon.DotNet` | 4.1.1 | TOON serializer. Namespace is `ToonFormat`. Unused until the `query` tool. |
+| `Toon.DotNet` | 4.1.1 | TOON serializer. Namespace is `ToonFormat`. The `DataTable` overload only. |
 
 Test project:
 
@@ -124,8 +143,16 @@ Test project:
 | `Microsoft.AspNetCore.Mvc.Testing` | 10.0.12 | `WebApplicationFactory` for the in-process target. |
 | `ModelContextProtocol.Core` | 2.2.0 | The MCP client: `HttpClientTransport`, `McpClient`. |
 
-`SQLitePCLRaw.core` arrives through `Microsoft.Data.Sqlite`. The sidecar calls it directly
-for the sandbox. Do not add a separate reference unless the transitive one disappears.
+Developer tools. A `scripts/*.cs` file-based app is not part of the shipped image, thus a package
+here has no effect on the sidecar or on NativeAOT:
+
+| Package | Version | Purpose |
+| --- | --- | --- |
+| `Spectre.Console` | 0.57.2 | Prompts, panels and validation in `scripts/token.cs`. |
+
+`SQLitePCLRaw.core` 3.0.5 arrives through `Microsoft.Data.Sqlite`. The sidecar calls it directly for
+the sandbox. Do not add a separate reference unless the transitive one disappears. The sandbox uses
+the same API surface on 2.1.12, thus it does not depend on that version.
 
 Do not build a custom SQLite, do not switch SQLite versions at runtime and do not write a
 TOON serializer.

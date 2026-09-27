@@ -42,6 +42,20 @@ honestly instead of reporting a false failure.
 The external target needs `SIDECAR_E2E_PERMISSIONS`, because the harness cannot learn the permission
 set of a process that it did not start.
 
+## Custom settings and the database path
+
+```csharp
+SidecarHarness.Create("schema,read", settings: new Dictionary<string, string?> { ["MAX_ROWS"] = "2" });
+```
+
+`Create` takes extra `SQLITE_SIDECAR_` values, thus a test proves a limit with a small bound and no
+large fixture. A test value wins over the harness default. The same skip rule applies: the external
+target cannot restart the process, thus a test that passes any setting is skipped there.
+
+`harness.DatabasePath` names the file that the in-process harness built, for a test that writes to
+the database as the owning application does. It is `null` on the external target, and such a test
+skips itself.
+
 ## In-memory configuration, not environment variables
 
 ```csharp
@@ -60,7 +74,7 @@ adds. See [../configuration/options.md](../configuration/options.md).
 new HttpClientTransport(
     new HttpClientTransportOptions
     {
-        Endpoint = new Uri(httpClient.BaseAddress!, "/mcp"),
+        Endpoint = new Uri(httpClient.BaseAddress!, SidecarEndpoints.Mcp),
         TransportMode = HttpTransportMode.StreamableHttp,
         EnableStandaloneGetStream = false,
         AdditionalHeaders = new Dictionary<string, string> { ["Authorization"] = $"Bearer {token}" },
@@ -136,6 +150,13 @@ variables match both paths.
 | `AuthTests` | Health without a token, `401` for an absent header and for a wrong token, the identical answer for both, and a challenge with no error description. |
 | `PermissionGatingTests` | `tools/list` per permission set, the backstop rejection, the exposed tool set, and a description on each tool. |
 | `SchemaToolTests` | Usable DDL, no internal `sqlite_%` objects, no row data, and no database path. |
+| `SandboxBoundaryTests` | Each hard boundary through `query`: `ATTACH`, DDL, pragmas, `VACUUM INTO`, `load_extension`, writes, transaction control, more than one statement. Also that a rejection names no path and that the permission set does not weaken any of it. |
+| `QueryToolTests` | TOON output, the `truncated` flag, an empty result, ordinary SQL functions, repeated column names, both truncation limits, `ResultTooLarge`, the timeout interrupt, a read while the application writes, and the absence of `query` without the `read` permission. |
+
+**Lesson.** A tool failure arrives as a `CallToolResult` with `IsError` set, and not as a transport
+exception. `CallQueryAsync` and `CallSchemaAsync` raise `McpToolFailure` for that shape, thus a test
+asserts on the error code the same way for both. A test that used `Record.ExceptionAsync` against
+the raw call would pass with no error at all. See [../mcp/error-model.md](../mcp/error-model.md).
 
 A pure configuration case asserts on `SidecarConfigurationException` from `SidecarOptions.Load`. A
 case that needs the filesystem or the pipeline boots a host through the harness.

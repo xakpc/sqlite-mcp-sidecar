@@ -72,7 +72,7 @@ public sealed class PermissionGatingTests
 
         var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(["schema"], tools.Select(t => t.Name).Order());
+        Assert.Equal(["query", "schema"], tools.Select(t => t.Name).Order());
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
+using Xakpc.SQLiteMCPSidecar.Mcp;
 using Xakpc.SQLiteMCPSidecar.Tests.Fixtures;
 
 namespace Xakpc.SQLiteMCPSidecar.Tests.Harness;
@@ -34,13 +35,28 @@ public abstract class SidecarHarness : IAsyncDisposable
     public abstract HttpClient CreateHttpClient();
 
     /// <summary>
+    /// The database file that this sidecar serves, or <c>null</c> when the harness did not create
+    /// it. A test that writes to the database directly needs it.
+    /// </summary>
+    public virtual string? DatabasePath => null;
+
+    /// <summary>
     /// Starts a sidecar with the given permission set.
     /// </summary>
+    /// <param name="permissions">The deployment permission specification.</param>
+    /// <param name="journalMode"><c>wal</c>, or <c>delete</c> for a rollback-journal database.</param>
+    /// <param name="settings">
+    /// Extra <c>SQLITE_SIDECAR_</c> values, for example a small <c>MAX_ROWS</c>. A test that passes
+    /// any is skipped on the external target, which cannot restart the process.
+    /// </param>
     /// <remarks>
     /// An external sidecar has a fixed permission set. A test that needs a different one is skipped
     /// rather than failed, because the external run cannot restart the process.
     /// </remarks>
-    public static SidecarHarness Create(string permissions, string journalMode = "wal")
+    public static SidecarHarness Create(
+        string permissions,
+        string journalMode = "wal",
+        IReadOnlyDictionary<string, string?>? settings = null)
     {
         if (IsExternal)
         {
@@ -50,10 +66,15 @@ public abstract class SidecarHarness : IAsyncDisposable
                 Assert.Skip($"The external sidecar has permissions '{external.Permissions}', and this test needs '{permissions}'.");
             }
 
+            if (settings is { Count: > 0 })
+            {
+                Assert.Skip("This test needs a sidecar with custom settings, and the external sidecar cannot restart.");
+            }
+
             return external;
         }
 
-        return new InProcessSidecarHarness(permissions, journalMode);
+        return new InProcessSidecarHarness(permissions, journalMode, settings);
     }
 
     /// <summary>Connects an MCP client over Streamable HTTP with the deployment token.</summary>
@@ -63,7 +84,7 @@ public abstract class SidecarHarness : IAsyncDisposable
         var transport = new HttpClientTransport(
             new HttpClientTransportOptions
             {
-                Endpoint = new Uri(httpClient.BaseAddress!, "/mcp"),
+                Endpoint = new Uri(httpClient.BaseAddress!, SidecarEndpoints.Mcp),
                 TransportMode = HttpTransportMode.StreamableHttp,
                 // The transport is stateless, thus the GET endpoint is unavailable and a standalone
                 // stream would only occupy a connection.
@@ -97,7 +118,7 @@ public sealed class InProcessSidecarHarness : SidecarHarness
     private readonly WebApplicationFactory<Program> _factory;
     private readonly TemporaryDatabase _database;
 
-    public InProcessSidecarHarness(string permissions, string journalMode)
+    public InProcessSidecarHarness(string permissions, string journalMode, IReadOnlyDictionary<string, string?>? extraSettings = null)
     {
         Permissions = permissions;
         _database = SampleDatabase.CreateTemporary(journalMode);
@@ -110,6 +131,12 @@ public sealed class InProcessSidecarHarness : SidecarHarness
             ["BACKUP_DIR"] = _database.BackupDirectory,
         };
 
+        // A test value wins, thus a test bounds a limit without a large fixture.
+        foreach (var (key, value) in extraSettings ?? new Dictionary<string, string?>())
+        {
+            settings[key] = value;
+        }
+
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(webHost =>
         {
             // In-memory configuration and not process environment variables: environment variables
@@ -121,6 +148,8 @@ public sealed class InProcessSidecarHarness : SidecarHarness
     public override string Token => "test-token-9f2c41";
 
     public override string Permissions { get; }
+
+    public override string DatabasePath => _database.Path;
 
     public override HttpClient CreateHttpClient() => _factory.CreateClient();
 

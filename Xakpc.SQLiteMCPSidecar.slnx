@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/scripts/">
+    <File Path="scripts/token.cs" />
+  </Folder>
   <Project Path="src/Xakpc.SQLiteMCPSidecar/Xakpc.SQLiteMCPSidecar.csproj" />
   <Project Path="test/Xakpc.SQLiteMCPSidecar.Tests/Xakpc.SQLiteMCPSidecar.Tests.csproj" />
 </Solution>

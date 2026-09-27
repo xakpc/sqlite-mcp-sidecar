@@ -35,7 +35,7 @@ documentation.
 - **effective limit** — `min(client maxRows, SQLITE_SIDECAR_MAX_WRITE_ROWS)`.
 - **bounded pre-count** — the `LIMIT N+1` count that runs before a structured `update` or `delete`. It rejects a broad filter before any write.
 - **row-limit rollback** — the rollback that reverts a structured write when the affected row count is more than the effective limit.
-- **write budget** — the rolling per-minute cap on total written rows for the sidecar **process**. It is not shared between processes.
+- **write budget** — the rolling per-minute cap on total written rows for the sidecar **process**. It is not shared between processes. Do not confuse it with the **request budget**.
 - **`requestId`** — the mandatory idempotency key on each write tool. The same key returns the stored response of a committed write.
 - **replayed write** — a write request that the sidecar answered from the idempotency cache. It changed nothing.
 
@@ -47,6 +47,13 @@ documentation.
 - **sample database** — the database that `Fixtures/sample-db.sql` builds. The test suite and the dev script share it.
 - **dev sidecar** — the live sidecar that `scripts/dev-sidecar.ps1` starts for a manual session.
 
+## Public endpoint
+
+- **request budget** — the fixed one-minute cap on MCP requests for the sidecar **process**. It counts each request, also one with no token. It has no partition.
+- **path contract** — the rule that the sidecar routes the whole public path, `/db/mcp`, thus no proxy rewrites it.
+- **host gate** — the reverse proxy. It matches the `Host` header to route a request. The sidecar does no host filtering.
+- **forwarded address** — the `X-Forwarded-For` value. It is a claim of the caller, not a fact.
+
 ## SQLite controls
 
 - **sandbox** — the set of always-on SQLite controls. It is not a feature flag.
@@ -54,7 +61,11 @@ documentation.
 - **defensive mode** — `SQLITE_DBCONFIG_DEFENSIVE`. It blocks direct schema corruption.
 - **trusted schema off** — `SQLITE_DBCONFIG_TRUSTED_SCHEMA = 0`. It distrusts objects stored in the schema.
 - **runtime limit** — a per-connection `sqlite3_limit` value, for example SQL length or VDBE operation count.
+- **baseline** — the settings that `SqliteSecurity.ApplyBaseline` puts on a handle after each `Open`.
+- **allowlist policy** — the authorizer rule that accepts a named few actions and rejects each other one.
 - **interrupt** — the `sqlite3_interrupt` call that stops a running statement on timeout or cancellation.
+- **progress handler** — the callback that reports cancellation from inside the virtual machine. It is the second stop path.
+- **one-statement check** — the preparation that proves the caller sent exactly one statement. A non-empty `tail` is a second statement.
 - **hard boundary** — an action that the sidecar always rejects, also with `danger-raw-write`.
 
 ## Backups
@@ -69,11 +80,14 @@ documentation.
 - **TOON** — Token-Oriented Object Notation. The compact tabular text format for row data only.
 - **bounded result** — a buffered result that respects the row limit and the byte limit.
 - **truncated** — the flag that reports that the sidecar stopped at a limit.
+- **blob placeholder** — the text `<blob: N bytes>` that replaces a BLOB value in a result.
+- **tool failure** — a `CallToolResult` with `IsError` set. It carries an error code. A tool never throws to report one.
 
 ## Related
 
 - Permission detail: [security/permissions.md](security/permissions.md)
+- Public endpoint detail: [security/public-endpoint.md](security/public-endpoint.md)
 - Testing detail: [testing/e2e-harness.md](testing/e2e-harness.md)
-- Sandbox detail: [plans/design/sqlite-sandbox.md](plans/design/sqlite-sandbox.md)
+- Sandbox detail: [database/sqlite-sandbox.md](database/sqlite-sandbox.md)
 - Idempotency detail: [plans/design/write-idempotency.md](plans/design/write-idempotency.md)
-- Result format detail: [plans/design/toon-results.md](plans/design/toon-results.md)
+- Result format detail: [mcp/query-results.md](mcp/query-results.md)

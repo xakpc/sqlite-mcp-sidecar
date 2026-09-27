@@ -17,6 +17,25 @@ Authorization: Bearer <secret>
 - The sidecar never generates, persists, returns or logs the token.
 - Startup fails when the token is absent.
 
+### Mint a token
+
+`scripts/token.cs` is a file-based app with prompts. It asks for the deployment shape, makes one
+token and prints the matching `SQLITE_SIDECAR_` block for a `.env` file, PowerShell, bash or docker
+compose.
+
+```powershell
+dotnet run scripts/token.cs
+```
+
+- The token is Base64Url text over 32, 48 or 64 bytes from `RandomNumberGenerator`. Base64Url has
+  no character that a shell, YAML or an HTTP header must quote, thus the value that the operator
+  sees is the value that the handler compares.
+- The tool repeats two startup rules, thus its output starts the sidecar: it repairs the read floor
+  and it asks for a backup directory only with the `backup` permission.
+- The tool is beside the sidecar and not inside it. The sidecar process still generates no token.
+- The optional output file goes under `build/`, which git ignores. The tool warns about each other
+  path and it sets owner-only permissions on a non-Windows host.
+
 The comparison is constant time. A plain string comparison leaks length and prefix information
 through timing.
 
@@ -67,8 +86,9 @@ states which check failed. `AuthTests` compares the two responses field by field
 `HandleChallengeAsync` writes the bare challenge itself. The MVP has one static token, thus there
 is no OAuth resource-metadata challenge.
 
-A rejection logs the path and the remote address at warning level. It never logs the presented
-value.
+A rejection logs the path, the connection address and the claimed `X-Forwarded-For` value at warning
+level. It never logs the presented token. The request budget runs before this handler, thus a flood
+cannot fill the log. See [public-endpoint.md](public-endpoint.md).
 
 ## Health endpoint
 
@@ -78,7 +98,7 @@ GET /health      ->  200 {"status":"ok"}
 
 It needs no token and it touches no database. A probe runs often, and an expensive probe becomes a
 denial-of-service vector against the owning application. `/health` is mapped without
-`RequireAuthorization()`; `/mcp` is mapped with it.
+`RequireAuthorization()`; `/db/mcp` is mapped with it and with the request budget.
 
 The endpoint uses the `RequestDelegate` overload of `MapGet`. The `Delegate` overload reflects over
 the delegate signature, which the AOT analyzers report as IL2026 and IL3050.
@@ -87,20 +107,24 @@ the delegate signature, which the AOT analyzers report as IL2026 and IL3050.
 
 ```mermaid
 flowchart TD
-    client[MCP client] -->|HTTPS| proxy[Caddy / nginx / Traefik / ingress]
+    client[MCP client] -->|HTTPS, public| proxy[kamal-proxy / Traefik / Caddy / nginx]
     proxy -->|private HTTP| sidecar[sqlite-sidecar-mcp]
 ```
 
-The sidecar does not manage certificates and it has no HTTPS redirection. A reverse proxy
+The proxy may serve the public internet. The token is then the only gate between an unknown caller
+and a live database, thus the request budget and the identical `401` are both necessary.
+
+The sidecar does not manage certificates and it has no HTTPS redirection. The reverse proxy
 terminates TLS.
 
-- Do not expose the sidecar directly to an untrusted network over plaintext HTTP.
+- Never publish the container port to an untrusted network. The proxy is the only path in.
 - CORS is off. Browser access is not a product goal.
-- Host validation uses the ASP.NET Core host filtering middleware. `AllowedHosts` is `localhost`
-  and a deployment must set it.
+- The sidecar does **no** host filtering. The proxy matches `Host` to route the request and it is
+  the host gate. See [public-endpoint.md](public-endpoint.md).
 
 ## Related
 
+- [public-endpoint.md](public-endpoint.md)
 - [permissions.md](permissions.md)
 - [../configuration/options.md](../configuration/options.md)
 - [../plans/design/security-model.md](../plans/design/security-model.md)

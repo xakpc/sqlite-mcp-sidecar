@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using Xakpc.SQLiteMCPSidecar.Mcp;
 using Xakpc.SQLiteMCPSidecar.Tests.Harness;
 
 namespace Xakpc.SQLiteMCPSidecar.Tests;
@@ -20,7 +21,7 @@ public sealed class AuthTests
         await using var harness = SidecarHarness.Create("schema,read");
         using var client = harness.CreateHttpClient();
 
-        var response = await client.GetAsync("/health", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync(SidecarEndpoints.Health, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -97,7 +98,7 @@ public sealed class AuthTests
     private static async Task<HttpResponseMessage> PostMcpAsync(SidecarHarness harness, string? token)
     {
         using var client = harness.CreateHttpClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        using var request = new HttpRequestMessage(HttpMethod.Post, SidecarEndpoints.Mcp)
         {
             Content = new StringContent(ToolsListBody, Encoding.UTF8, "application/json"),
         };

@@ -1,4 +1,6 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.RateLimiting;
 using ModelContextProtocol.AspNetCore;
 using Xakpc.SQLiteMCPSidecar.Configuration;
 using Xakpc.SQLiteMCPSidecar.Database;
@@ -46,6 +48,33 @@ foreach (var permissionName in PermissionSet.AllNames)
             .RequireClaim(PermissionSet.ClaimType, permissionName));
 }
 
+// One request budget for the whole process, and no partition. The deployment has one identity, thus
+// one budget says the same thing. A partition by client address would need X-Forwarded-For, which
+// the caller controls, and an evadable limit is worse than an honest global one.
+//
+// The middleware runs before authentication, thus a flood of wrong tokens is bounded too. Each
+// rejection writes a warning line, thus an unbounded flood is a log-volume attack even though the
+// token comparison itself is cheap.
+builder.Services.AddRateLimiter(rateLimiter =>
+{
+    // 429 and not the 503 default. A 503 tells an agent that the sidecar is broken, and a correct
+    // agent then retries a request that it should slow down instead.
+    rateLimiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    rateLimiter.AddPolicy(SidecarEndpoints.McpRateLimitPolicy, context =>
+        // The options are resolved here and not above, because SidecarOptions is read at the first
+        // resolve. The partition key is constant, thus every request shares one limiter.
+        RateLimitPartition.GetFixedWindowLimiter(
+            SidecarEndpoints.McpRateLimitPolicy,
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = context.RequestServices.GetRequiredService<SidecarOptions>().MaxRequestsPerMinute,
+                Window = TimeSpan.FromMinutes(1),
+                // Reject, never queue. A queue hides the overload and it holds a connection while
+                // the agent already waits for an answer.
+                QueueLimit = 0,
+            }));
+});
+
 builder.Services
     .AddMcpServer()
     .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
@@ -62,6 +91,9 @@ var app = builder.Build();
 // first request: an orchestrator sees a failed start and an operator sees it immediately.
 await SidecarStartup.RunAsync(app.Services, app.Logger, CancellationToken.None);
 
+// Before authentication on purpose. See the registration above.
+app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -69,13 +101,16 @@ app.UseAuthorization();
 // expensive probe becomes a denial-of-service vector against the owning application.
 // The RequestDelegate overload, not the Delegate overload. The Delegate overload reflects over the
 // delegate signature, which the AOT analyzer reports as IL2026 and IL3050.
-app.MapGet("/health", static context =>
+app.MapGet(SidecarEndpoints.Health, static context =>
 {
     context.Response.ContentType = "application/json";
     return context.Response.WriteAsync("""{"status":"ok"}""");
 });
 
-app.MapMcp("/mcp").RequireAuthorization();
+// The whole public path, thus no proxy rewrites it. See SidecarEndpoints.
+app.MapMcp(SidecarEndpoints.Mcp)
+    .RequireAuthorization()
+    .RequireRateLimiting(SidecarEndpoints.McpRateLimitPolicy);
 
 app.Run();
 

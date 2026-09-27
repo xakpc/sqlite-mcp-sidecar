@@ -64,6 +64,9 @@ public sealed class SchemaToolTests
     internal static async Task<string> CallSchemaAsync(ModelContextProtocol.Client.McpClient client)
     {
         var result = await client.CallToolAsync("schema", cancellationToken: TestContext.Current.CancellationToken);
-        return string.Concat(result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().Select(c => c.Text));
+        var text = string.Concat(result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().Select(c => c.Text));
+
+        // A tool failure arrives as a result with IsError set, not as a transport exception.
+        return result.IsError == true ? throw new McpToolFailure(text) : text;
     }
 }

@@ -89,7 +89,7 @@ danger-raw-write  ==  raw INSERT / UPDATE / DELETE in the sandbox
 ```
 
 The permission permits arbitrary data manipulation. It does not permit SQLite administration
-or filesystem access. Detail is in [sqlite-sandbox.md](sqlite-sandbox.md).
+or filesystem access. Detail is in [sqlite-sandbox.md](../../database/sqlite-sandbox.md).
 
 ## Results
 
@@ -111,7 +111,7 @@ rows[1]{id,retry}:
 ```
 
 The TOON result obeys the same row limit and byte limit as `query`. See
-[toon-results.md](toon-results.md).
+[toon-results.md](../../mcp/query-results.md).
 
 ## Limits that still apply
 
@@ -173,5 +173,5 @@ for an unbounded time.
 
 - [structured-writes.md](structured-writes.md)
 - [write-idempotency.md](write-idempotency.md)
-- [sqlite-sandbox.md](sqlite-sandbox.md)
+- [sqlite-sandbox.md](../../database/sqlite-sandbox.md)
 - [../../security/permissions.md](../../security/permissions.md)

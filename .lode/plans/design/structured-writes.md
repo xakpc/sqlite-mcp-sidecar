@@ -109,7 +109,7 @@ Rules:
 - Quote identifiers after validation. Validation is the security control. Quoting is the correctness control.
 
 Schema validation is the reason that a structured write cannot reach an unexpected object.
-The authorizer is the second layer. See [sqlite-sandbox.md](sqlite-sandbox.md).
+The authorizer is the second layer. See [sqlite-sandbox.md](../../database/sqlite-sandbox.md).
 
 ## Bounded writes
 
@@ -148,7 +148,7 @@ path operates as designed.
 
 **Invariant.** The authorizer rejects transaction control. Install it after the server runs
 `BEGIN IMMEDIATE` and remove it before the server commits or rolls back, else the server
-rejects its own transaction. See [sqlite-sandbox.md](sqlite-sandbox.md).
+rejects its own transaction. See [sqlite-sandbox.md](../../database/sqlite-sandbox.md).
 
 **Invariant.** Both checks are necessary and they protect different things:
 
@@ -172,7 +172,7 @@ WriteLimitExceeded: the filter matched more than 100 rows. Narrow the filter.
 
 The log records which check rejected the operation. The agent does not receive that detail,
 because the correct next action is the same in both cases. See
-[error-model.md](error-model.md).
+[error-model.md](../../mcp/error-model.md).
 
 ## Write-rate budget
 
@@ -197,4 +197,4 @@ writes also count. See [raw-writes.md](raw-writes.md).
 - [write-idempotency.md](write-idempotency.md)
 - [raw-writes.md](raw-writes.md)
 - [connection-policy.md](connection-policy.md)
-- [error-model.md](error-model.md)
+- [error-model.md](../../mcp/error-model.md)

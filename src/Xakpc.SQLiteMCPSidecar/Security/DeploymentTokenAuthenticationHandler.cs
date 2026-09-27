@@ -84,13 +84,21 @@ public sealed partial class DeploymentTokenAuthenticationHandler : Authenticatio
 
     private AuthenticateResult Reject()
     {
-        LogRejected(Logger, Request.Path.Value ?? "/", Context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+        // Two addresses, because a public deployment runs behind a reverse proxy: remote is the
+        // proxy and it is true, forwarded is what the caller claims and a caller can forge it.
+        // The header is read here and not through the forwarded-headers middleware, which
+        // CreateSlimBuilder does not add, and which would replace the true address with the claim.
+        LogRejected(
+            Logger,
+            Request.Path.Value ?? "/",
+            Context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            Request.Headers["X-Forwarded-For"].ToString() is { Length: > 0 } forwarded ? forwarded : "none");
 
         // The same result for an absent header and for a wrong token. Never the presented value.
         return AuthenticateResult.Fail("Unauthorized.");
     }
 
     [LoggerMessage(EventId = 1001, Level = LogLevel.Warning,
-        Message = "Unauthorized request rejected. path={Path} remote={Remote}")]
-    private static partial void LogRejected(ILogger logger, string path, string remote);
+        Message = "Unauthorized request rejected. path={Path} remote={Remote} forwarded={Forwarded}")]
+    private static partial void LogRejected(ILogger logger, string path, string remote, string forwarded);
 }

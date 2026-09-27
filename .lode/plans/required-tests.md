@@ -12,6 +12,17 @@ prove the shipped behaviour.
 
 These are mandatory. Each statement must fail remotely, **also** with `danger-raw-write`.
 
+The list runs in `SandboxBoundaryTests` through the `query` tool, and Phase 6 runs it again through
+`execute_write_sql`. Two codes appear, and both mean that the action is not available:
+
+```text
+QueryRejected   the authorizer refused a valid statement
+InvalidQuery    the text is not one statement, or the name does not exist
+```
+
+`load_extension` gives `InvalidQuery`, because extension loading is off on the connection and SQLite
+never registers the function. See [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md).
+
 ```sql
 ATTACH DATABASE '/tmp/x.db' AS x;
 DETACH DATABASE x;
@@ -25,7 +36,11 @@ PRAGMA journal_mode = OFF;
 SELECT load_extension('/tmp/malicious.so');
 
 VACUUM INTO '/tmp/copy.db';
+
+SELECT 1; SELECT 2;
 ```
+
+`VACUUM INTO` also asserts that no file appears at the target path.
 
 Startup tests. These run in `StartupTests`, and the list is complete:
 
@@ -73,13 +88,40 @@ raw PRAGMA mutation rejected
 raw transaction control rejected
 ```
 
+## Required endpoint tests
+
+`RateLimitTests` runs the request budget list and it is complete:
+
+```text
+a request over the budget -> 429
+a request with no token also uses a permit
+/health is outside the budget
+```
+
+The budget test sets `MAX_REQUESTS_PER_MINUTE=2`, thus it is skipped on the external target, which
+cannot restart the process. The `429` matters: a `503` would tell an agent that the sidecar is
+broken. See [../security/public-endpoint.md](../security/public-endpoint.md).
+
 ## Required functional tests
+
+The read list runs in `SchemaToolTests` and `QueryToolTests` and it is complete:
 
 ```text
 schema discovery returns usable DDL
 TOON query output
 read while the application writes
+empty result
+ordinary SQL functions still work
+join with repeated column names
+row-limit truncation
+byte-limit truncation
+one oversized row -> ResultTooLarge
+runaway query -> QueryTimedOut
+```
 
+Each remaining item belongs to its phase:
+
+```text
 structured insert
 structured update
 structured delete
@@ -117,4 +159,4 @@ native SQLite build, thus a Windows developer run does not prove the shipped beh
 
 - [mvp-roadmap.md](mvp-roadmap.md) — which phase owns which list
 - [../testing/e2e-harness.md](../testing/e2e-harness.md)
-- [design/sqlite-sandbox.md](design/sqlite-sandbox.md) — the hard boundaries
+- [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md) — the hard boundaries

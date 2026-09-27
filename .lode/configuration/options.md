@@ -31,13 +31,18 @@ SQLITE_SIDECAR_QUERY_TIMEOUT_SECONDS=10
 SQLITE_SIDECAR_BUSY_TIMEOUT_SECONDS=3
 
 SQLITE_SIDECAR_MAX_CONCURRENCY=4
+SQLITE_SIDECAR_MAX_REQUESTS_PER_MINUTE=120
 
 SQLITE_SIDECAR_MAX_WRITE_ROWS=100
 SQLITE_SIDECAR_MAX_WRITE_ROWS_PER_MINUTE=500
 ```
 
-`MAX_CONCURRENCY` and `BUSY_TIMEOUT_SECONDS` are active. The other limits are bound and validated,
-and the code that applies them arrives with the `query` and write tools.
+`MAX_CONCURRENCY`, `BUSY_TIMEOUT_SECONDS` and `MAX_REQUESTS_PER_MINUTE` are active. The other limits
+are bound and validated, and the code that applies them arrives with the write tools.
+
+`MAX_REQUESTS_PER_MINUTE` is the whole request budget of the process. It needs one number only,
+because the window is a constant minute. See
+[../security/public-endpoint.md](../security/public-endpoint.md).
 
 There is no backup timeout variable and no idempotency variable. Those values are constants.
 
@@ -129,8 +134,10 @@ to start would make the sidecar unusable with many correct deployments.
 ASPNETCORE_URLS=http://0.0.0.0:8080
 ```
 
-`appsettings.json` sets `AllowedHosts` to `localhost`. A deployment must set the host name that
-the reverse proxy forwards. The template value `*` is too wide for production.
+`appsettings.json` sets **no** `AllowedHosts` value. `CreateSlimBuilder` adds no host-filtering
+middleware, thus the key would read as a control that does not run. The reverse proxy is the host
+gate. A comment in the file records this, because the removal is the surprising part. See
+[../security/public-endpoint.md](../security/public-endpoint.md).
 
 ## Related
 

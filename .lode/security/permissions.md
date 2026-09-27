@@ -98,7 +98,7 @@ The outcome agrees with `PermissionDenied`, because the agent must stop and must
 wording is different. The MVP accepts this, because the primary layer removes the tool from the list
 and an agent reaches the backstop rarely. A `AddCallToolFilter` that maps the rejection onto
 `PermissionDenied` is the change if one vocabulary becomes necessary. See
-[../plans/design/error-model.md](../plans/design/error-model.md).
+[../mcp/error-model.md](../mcp/error-model.md).
 
 ## Invariants
 

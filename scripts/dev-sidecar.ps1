@@ -58,7 +58,7 @@ $env:ASPNETCORE_URLS = "http://localhost:$Port"
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 
 Write-Host ''
-Write-Host "  MCP endpoint  http://localhost:$Port/mcp" -ForegroundColor Green
+Write-Host "  MCP endpoint  http://localhost:$Port/db/mcp" -ForegroundColor Green
 Write-Host "  health        http://localhost:$Port/health" -ForegroundColor Green
 Write-Host "  token         $Token" -ForegroundColor Green
 Write-Host "  permissions   $Permissions" -ForegroundColor Green

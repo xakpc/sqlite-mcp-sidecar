@@ -17,6 +17,8 @@ deployment-level table allowlist
 
 OAuth / OIDC
 mTLS
+token rotation windows
+per-caller rate partitions
 
 REST API
 CLI
@@ -58,8 +60,16 @@ each table in the database. See
 [../decisions/0002-write-is-a-whole-database-grant.md](../decisions/0002-write-is-a-whole-database-grant.md).
 
 **OAuth, OIDC and mTLS.** The reverse proxy owns transport identity. One bearer token agrees
-with the one-identity model. See
-[../security/authentication.md](../security/authentication.md).
+with the one-identity model. A public endpoint does not change this: the consumer is one agent that
+the operator configures, and such a client sends a static header. An OAuth client that needs
+resource-metadata discovery cannot connect, and that is accepted. See
+[../security/authentication.md](../security/authentication.md) and
+[design/platform-deployment.md](design/platform-deployment.md).
+
+**Token rotation windows and per-caller rate partitions.** Both need a list in place of one value: a
+set of valid tokens, or a caller identity to partition by. The deployment has one token and one
+identity, thus each feature needs that model to change first. The request budget is therefore global.
+See [../security/public-endpoint.md](../security/public-endpoint.md).
 
 **REST API, CLI and browser UI.** The product has one MCP endpoint. A second surface makes the
 security review area two times larger for no product gain. CORS is off, and browser access is
@@ -67,7 +77,7 @@ not a goal.
 
 **DDL.** Schema change is the responsibility of the owning application. A sidecar that changes
 the schema can break that application, and DDL is a hard boundary in the sandbox. See
-[design/sqlite-sandbox.md](design/sqlite-sandbox.md).
+[../database/sqlite-sandbox.md](../database/sqlite-sandbox.md).
 
 **Restore, automatic backup before delete, retention and upload.** Restore is an operator
 action on the host. A restore tool permits a remote caller to replace the live database, which

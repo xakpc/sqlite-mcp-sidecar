@@ -12,6 +12,12 @@ internal enum AuthorizerPolicy
 {
     /// <summary>Read-only caller SQL. The policy of the <c>query</c> tool.</summary>
     Read,
+
+    /// <summary>
+    /// Server-authored DML. The policy of the structured write tools, <c>insert</c>, <c>update</c>
+    /// and <c>delete</c>.
+    /// </summary>
+    Write,
 }
 
 /// <summary>The outcome of the one-statement check that runs before execution.</summary>
@@ -209,6 +215,24 @@ internal static class SqliteSecurity
         }
     }
 
+    /// <summary>
+    /// Reads the rowid of the last inserted row on this connection.
+    /// </summary>
+    /// <remarks>
+    /// <c>Microsoft.Data.Sqlite</c> exposes no such property, and <c>SELECT last_insert_rowid()</c>
+    /// would cost one more statement inside the transaction. The native call reads connection state and
+    /// runs no statement, thus it also works while an authorizer is installed.
+    /// </remarks>
+    public static long LastInsertRowId(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        var handle = connection.Handle
+            ?? throw new InvalidOperationException("The connection is not open, thus it has no handle.");
+
+        return raw.sqlite3_last_insert_rowid(handle);
+    }
+
     private static void Check(int result, sqlite3 handle, string what)
     {
         if (result != raw.SQLITE_OK)
@@ -238,6 +262,7 @@ internal static class SqliteSecurity
             _callback = policy switch
             {
                 AuthorizerPolicy.Read => ReadPolicy,
+                AuthorizerPolicy.Write => WritePolicy,
                 _ => throw new ArgumentOutOfRangeException(nameof(policy)),
             };
 
@@ -282,6 +307,53 @@ internal static class SqliteSecurity
                 if (actionCode == raw.SQLITE_FUNCTION)
                 {
                     // For SQLITE_FUNCTION the first argument is absent and the second is the name.
+                    var name = arg2.utf8_to_string();
+                    return name is not null && !IsDeniedFunction(name) ? raw.SQLITE_OK : raw.SQLITE_DENY;
+                }
+
+                return raw.SQLITE_DENY;
+            }
+            catch
+            {
+                // An exception must never cross a native callback boundary. Reject instead.
+                return raw.SQLITE_DENY;
+            }
+        }
+
+        /// <summary>
+        /// The write policy. It is the read policy plus the three DML actions.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// An allowlist for the same three reasons as the read policy. <c>SQLITE_TRANSACTION</c> stays
+        /// denied, thus the server must run <c>BEGIN IMMEDIATE</c> before it installs this policy and
+        /// must remove the policy before it commits. <c>SQLITE_PRAGMA</c> also stays denied, thus the
+        /// identifier validation runs before the installation.
+        /// </para>
+        /// <para>
+        /// <c>SQLITE_SELECT</c> and <c>SQLITE_READ</c> are necessary and they are not a weakness. The
+        /// bounded pre-count is a <c>SELECT</c>, a <c>CHECK</c> constraint reads the new row, and a
+        /// foreign key reads the referenced table. The statement is server-authored in each case, thus
+        /// this policy never sees caller SQL. <c>execute_write_sql</c> gets its own policy value in
+        /// Phase 6.
+        /// </para>
+        /// </remarks>
+        private static int WritePolicy(object? userData, int actionCode, utf8z arg1, utf8z arg2, utf8z dbName, utf8z trigger)
+        {
+            try
+            {
+                if (actionCode == raw.SQLITE_INSERT || actionCode == raw.SQLITE_UPDATE || actionCode == raw.SQLITE_DELETE)
+                {
+                    return raw.SQLITE_OK;
+                }
+
+                if (actionCode == raw.SQLITE_SELECT || actionCode == raw.SQLITE_READ || actionCode == raw.SQLITE_RECURSIVE)
+                {
+                    return raw.SQLITE_OK;
+                }
+
+                if (actionCode == raw.SQLITE_FUNCTION)
+                {
                     var name = arg2.utf8_to_string();
                     return name is not null && !IsDeniedFunction(name) ? raw.SQLITE_OK : raw.SQLITE_DENY;
                 }

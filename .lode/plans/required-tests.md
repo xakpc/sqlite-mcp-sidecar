@@ -51,24 +51,41 @@ permissions=reed                     -> startup fails
 non-WAL database + write permission  -> starts, logs the warning
 ```
 
-Structured write tests:
+Structured write tests. The `insert` list is complete, in `InsertToolTests` and `WriteBudgetTests`:
 
 ```text
-UPDATE without WHERE            -> InvalidWrite
-DELETE without WHERE            -> InvalidWrite
-write without requestId         -> InvalidWrite
-broad filter, pre-count fails   -> WriteLimitExceeded, no rows written
-over maxRows after execution    -> rollback, WriteLimitExceeded
-many small writes over budget   -> WriteBudgetExceeded
+write without requestId         -> InvalidWrite            done
+unknown table                   -> InvalidWrite            done
+unknown column                  -> InvalidWrite            done
+a view as the target            -> InvalidWrite            done
+CHECK violation                 -> InvalidWrite            done
+foreign key violation           -> InvalidWrite            done
+an object as a value            -> InvalidWrite            done
+many small writes over budget   -> WriteBudgetExceeded     done
+a rejected write costs no budget                           done
+
+UPDATE without WHERE            -> InvalidWrite            Phase 4b
+DELETE without WHERE            -> InvalidWrite            Phase 4b
+broad filter, pre-count fails   -> WriteLimitExceeded, no rows written   Phase 4b
+over maxRows after execution    -> rollback, WriteLimitExceeded          Phase 4b
 ```
 
-Idempotency tests:
+**The last case cannot be forced deterministically** through the public interface. The post-execution
+count differs from the pre-count only when another writer changes the data between the two, and the
+filter model has no non-deterministic operator to exploit. Phase 4b therefore asserts the invariant on
+every run — either success with `rowsAffected <= limit`, or `WriteLimitExceeded` with the table
+unchanged — and the `check=post` log field is the operator-facing evidence. Do not write a test that
+claims to force the second branch.
+
+Idempotency tests. The list is complete, in `WriteIdempotencyTests`:
 
 ```text
-same requestId twice            -> one write, the same response two times
-same requestId, new payload     -> InvalidWrite
-requestId after DatabaseBusy    -> the retry executes
-requestId over 128 characters   -> InvalidWrite
+same requestId twice            -> one write, the same response two times   done
+same requestId, new payload     -> InvalidWrite                            done
+a new key order is the same request                                        done
+requestId after a failure       -> the retry executes                      done
+requestId over 128 characters   -> InvalidWrite                            done
+a replayed write costs no budget                                           done
 ```
 
 Raw write tests:
@@ -119,10 +136,12 @@ one oversized row -> ResultTooLarge
 runaway query -> QueryTimedOut
 ```
 
+`structured insert` is also complete, in `InsertToolTests`: the row arrives with its values unchanged, a
+JSON null becomes a SQLite NULL, and the response carries the new rowid.
+
 Each remaining item belongs to its phase:
 
 ```text
-structured insert
 structured update
 structured delete
 rollback after a structured maxRows violation

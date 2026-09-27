@@ -19,6 +19,11 @@
     Shows the read-floor startup failure with a new database.
 
 .EXAMPLE
+    ./scripts/dev-sidecar.ps1 -Permissions 'schema,read,write'
+    Starts a structured-write deployment. Quote a list: PowerShell reads an unquoted
+    schema,read,write as an array and the parameter then rejects it.
+
+.EXAMPLE
     ./scripts/dev-sidecar.ps1
     Then, in a second shell, runs the whole e2e suite against this process:
         $env:SIDECAR_E2E_URL = 'http://localhost:8080'

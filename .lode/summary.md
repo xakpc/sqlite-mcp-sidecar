@@ -17,6 +17,10 @@ authentication, permission gating, the stateless MCP endpoint at `/db/mcp`, the 
 always-on SQLite sandbox, the `schema` and `query` tools, TOON results, and a dual-target end-to-end
 test harness.
 
+The write path is open. `insert` exists with the write connection, the write semaphore, the write
+authorizer policy, identifier validation, the write budget and the idempotency cache. `update` and
+`delete` need the filter model and the bounded pre-count, which is Phase 4b.
+
 | Area | State |
 | --- | --- |
 | Configuration and startup validation | Implemented — [configuration/options.md](configuration/options.md) |
@@ -29,7 +33,10 @@ test harness.
 | TOON results and limits | Implemented — [mcp/query-results.md](mcp/query-results.md) |
 | Error model, read path | Implemented — [mcp/error-model.md](mcp/error-model.md) |
 | Test harness | Implemented — [testing/e2e-harness.md](testing/e2e-harness.md) |
-| Structured writes | Not started — Phase 4 |
+| Write connection, write semaphore, write authorizer policy | Implemented — [database/connections.md](database/connections.md), [database/sqlite-sandbox.md](database/sqlite-sandbox.md) |
+| `insert` and identifier validation | Implemented — [database/structured-writes.md](database/structured-writes.md) |
+| Write budget and write idempotency | Implemented — [security/write-controls.md](security/write-controls.md) |
+| `update`, `delete`, the filter model, the pre-count | Not started — Phase 4b |
 | Backup and diagnostics | Not started — Phase 5 |
 | `danger-raw-write` | Not started — Phase 6 |
 | Container and documentation | Not started — Phase 7 |
@@ -59,14 +66,17 @@ src/Xakpc.SQLiteMCPSidecar/
     Dockerfile                     # still the Visual Studio template, Phase 7
     Properties/launchSettings.json # one profile for each deployment shape
     Configuration/                 SidecarOptions.cs, SidecarStartup.cs
-    Database/                      SqliteService.cs, SqliteSecurity.cs, QueryResult.cs
+    Database/                      SqliteService.cs, SqliteSecurity.cs, QueryResult.cs,
+                                   StructuredWriteBuilder.cs
     Mcp/                           SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs
-    Security/                      PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs
+    Security/                      PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs,
+                                   WriteBudget.cs, WriteDeduplication.cs
 test/Xakpc.SQLiteMCPSidecar.Tests/
     Harness/                       SidecarHarness.cs
     Fixtures/                      sample-db.sql, SampleDatabase.cs, DevDatabaseTests.cs
     StartupTests.cs, AuthTests.cs, PermissionGatingTests.cs, SchemaToolTests.cs
     SandboxBoundaryTests.cs, QueryToolTests.cs, RateLimitTests.cs
+    InsertToolTests.cs, WriteIdempotencyTests.cs, WriteBudgetTests.cs
 sqlite-sidecar-mcp — Design Document.md
 ```
 
@@ -95,7 +105,7 @@ schema   query   insert   update   delete
 backup   backup_status   diagnostics   execute_write_sql
 ```
 
-`schema` and `query` exist. The permission set decides which tools exist. See
+`schema`, `query` and `insert` exist. The permission set decides which tools exist. See
 [mcp/tool-catalog.md](mcp/tool-catalog.md).
 
 ## Context

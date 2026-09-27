@@ -1,7 +1,7 @@
 # MCP tool catalog
 
 The sidecar has one MCP endpoint at `/db/mcp` over Streamable HTTP. The catalog has nine tools at
-most, and two of them exist. The path is the whole public path on purpose. See
+most, and three of them exist. The path is the whole public path on purpose. See
 [../security/public-endpoint.md](../security/public-endpoint.md).
 
 Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidecar/Program.cs`.
@@ -10,9 +10,9 @@ Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidec
 | --- | --- | --- | --- | --- |
 | `schema` | `schema` | no | no | **Implemented** |
 | `query` | `read` | yes, read-only | no | **Implemented** |
-| `insert` | `write` | no | mandatory | Phase 4 |
-| `update` | `write` | no | mandatory | Phase 4 |
-| `delete` | `write` | no | mandatory | Phase 4 |
+| `insert` | `write` | no | mandatory | **Implemented** |
+| `update` | `write` | no | mandatory | Phase 4b |
+| `delete` | `write` | no | mandatory | Phase 4b |
 | `backup` | `backup` | no | no | Phase 5 |
 | `backup_status` | `backup` | no | no | Phase 5 |
 | `diagnostics` | `diagnostics` | no | no | Phase 5 |
@@ -20,7 +20,7 @@ Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidec
 
 A permission that has no tool yet exposes nothing.
 `PermissionGatingTests.OnlyTheImplementedToolsAreExposed` starts a deployment with every permission
-and asserts that `tools/list` holds `schema` and `query` only.
+and asserts that `tools/list` holds `schema`, `query` and `insert` only.
 
 ## Server registration
 
@@ -142,8 +142,50 @@ The rows are TOON. See [query-results.md](query-results.md). The rejections are 
 [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md), and the codes are in
 [error-model.md](error-model.md).
 
+## `insert`
+
+```csharp
+public async Task<CallToolResult> InsertAsync(
+    string? requestId = null,
+    string? table = null,
+    Dictionary<string, JsonElement>? values = null,
+    CancellationToken cancellationToken = default)
+```
+
+Three arguments. The caller sends no SQL: the server builds one parameterized `INSERT` that adds
+exactly one row. See [../database/structured-writes.md](../database/structured-writes.md).
+
+```text
+rowsAffected: 1
+rowid: 78
+```
+
+**Lesson.** Each mandatory argument carries `= null` and is validated in the method body. A nullable
+type alone is **not** enough: the binder of the SDK treats a parameter with no default value as
+required and throws when the argument is absent, and the SDK then replaces the message with `"An error
+occurred invoking 'insert'."`. The agent gets no code to select from, and the required case
+"write without requestId -> `InvalidWrite`" cannot pass.
+`WriteIdempotencyTests.AnAbsentRequestIdIsInvalidWrite` fails if the defaults are removed.
+
+The cost is that the generated JSON schema marks **no** argument as required:
+
+```json
+{"type":"object","properties":{
+  "requestId":{"type":["string","null"],"default":null,"description":"..."},
+  "table":{"type":["string","null"],"default":null,"description":"..."},
+  "values":{"type":["object","null"],"default":null,"description":"..."}}}
+```
+
+The tool description carries the requirement instead. That trade is correct: a description that the
+agent reads plus an actionable error beats a schema keyword plus an opaque failure.
+
+The description must also state the three limits that the schema cannot show: a value is a literal and
+never a SQL expression, one call adds one row, and there is no conflict clause.
+
 ## Related
 
+- [../database/structured-writes.md](../database/structured-writes.md)
+- [../security/write-controls.md](../security/write-controls.md)
 - [../security/permissions.md](../security/permissions.md)
 - [../database/connections.md](../database/connections.md)
 - [../testing/e2e-harness.md](../testing/e2e-harness.md)

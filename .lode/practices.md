@@ -29,11 +29,11 @@ fifth folder.
 src/Xakpc.SQLiteMCPSidecar/
     Program.cs
     Configuration/   SidecarOptions.cs, SidecarStartup.cs
-    Database/        SqliteService.cs, and later SqliteSecurity.cs,
-                     StructuredWriteBuilder.cs, BackupService.cs
+    Database/        SqliteService.cs, SqliteSecurity.cs, QueryResult.cs,
+                     StructuredWriteBuilder.cs, and later BackupService.cs
     Mcp/             SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs
     Security/        PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs,
-                     and later WriteBudget.cs, WriteDeduplication.cs
+                     WriteBudget.cs, WriteDeduplication.cs
 ```
 
 Startup validation lives in `Configuration/`, not in a `Startup/` folder. One file does not earn a
@@ -118,6 +118,16 @@ warning reports it. See [mcp/error-model.md](mcp/error-model.md).
 
 ```csharp
 return SidecarErrors.Failure(SidecarError.QueryRejected, "The requested action is not permitted.");
+```
+
+**A mandatory tool argument needs `= null` and in-method validation.** A nullable type alone is not
+enough: the binder of the SDK treats a parameter with no default value as required and throws when the
+argument is absent, and the SDK masks that message the same way it masks a thrown exception. The cost
+is that the JSON schema marks no argument as required, and the tool description carries the requirement
+instead. See [mcp/tool-catalog.md](mcp/tool-catalog.md).
+
+```csharp
+public async Task<CallToolResult> InsertAsync(string? requestId = null, ...)
 ```
 
 Explicit registration has two reasons. It keeps the exposed tool set under permission

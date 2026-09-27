@@ -1,9 +1,8 @@
 # Connections
 
-The sidecar opens a connection with the least privilege that the operation needs. Only the read-only
-connection has code today. The write connection, the transaction rules and the backup connection
-arrive with their tools, and their design is in
-[../plans/design/connection-policy.md](../plans/design/connection-policy.md).
+The sidecar opens a connection with the least privilege that the operation needs. The read-only
+connection and the write connection have code. The backup connection arrives with its tool, and its
+design is in [../plans/design/connection-policy.md](../plans/design/connection-policy.md).
 
 Code: `src/Xakpc.SQLiteMCPSidecar/Database/SqliteService.cs`.
 
@@ -38,6 +37,32 @@ mechanisms fail in different ways, thus both are present.
 Never use `ReadWriteCreate`. The database must exist already. Creation hides a wrong
 `SQLITE_SIDECAR_DB` path and makes an empty database next to the correct one.
 
+## The write connection
+
+```csharp
+public string ReadWriteConnectionString =>
+    new SqliteConnectionStringBuilder
+    {
+        DataSource = _options.DatabasePath,
+        Mode = SqliteOpenMode.ReadWrite,
+        Pooling = false,
+        DefaultTimeout = _options.BusyTimeoutSeconds,
+        ForeignKeys = true,
+    }.ConnectionString;
+```
+
+`OpenReadWriteAsync` applies the baseline and runs **no** `PRAGMA query_only`. That is the one
+difference from `OpenReadOnlyAsync`.
+
+**Invariant.** Only a write operation opens it. A read opens the read-only connection also when the
+deployment has write permissions.
+
+**Invariant.** `ForeignKeys = true`. SQLite defaults foreign key enforcement to **off**, and the
+setting belongs to the connection and not to the database file. It is therefore not on the list of
+settings that the owning application owns, further below. A write that breaks referential integrity is
+the damage class that this product must limit.
+`InsertToolTests.AForeignKeyViolationIsInvalidWrite` proves the rule and not the library default.
+
 ## Pooling is off
 
 A pooled handle keeps its state, including an authorizer from an earlier operation. That is a
@@ -63,10 +88,18 @@ using var slot = await database.AcquireRequestSlotAsync(cancellationToken);
 | Semaphore | Default | Scope | State |
 | --- | --- | --- | --- |
 | Request | `MAX_CONCURRENCY`, 4 | Each MCP operation | Active |
-| Write | 1 | Structured and raw writes | Phase 4 |
+| Write | 1 | Structured and raw writes | Active |
 | Backup | 1 | The background backup | Phase 5 |
 
 Three semaphores, and no scheduler framework.
+
+`TryAcquireWriteSlotAsync` returns `null` when the busy timeout expires first, and the tool then
+returns `DatabaseBusy`.
+
+**Invariant.** The wait for the write slot is bounded. A write takes a request slot first and then the
+write slot, thus a write that waits holds a request slot. An unbounded wait would let
+`MAX_CONCURRENCY` queued writes occupy every request slot and starve each read. `DatabaseBusy` is the
+honest code: another writer holds the lock, thus the agent retries later.
 
 ## Filesystem constraints
 

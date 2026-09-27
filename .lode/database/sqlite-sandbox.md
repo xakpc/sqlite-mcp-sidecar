@@ -27,6 +27,11 @@ same surface exists on `SQLitePCLRaw.core` 2.1.12, thus the code does not depend
 | Runtime limit | `raw.sqlite3_limit(h, id, value)` |
 | Statement count | `raw.sqlite3_prepare_v2(h, sql, out stmt, out tail)` |
 | Cancellation | `raw.sqlite3_interrupt(h)`, `raw.sqlite3_progress_handler(...)` |
+| Last inserted rowid | `raw.sqlite3_last_insert_rowid(h)` |
+
+`Microsoft.Data.Sqlite` has no `LastInsertRowId` property: that member belongs to
+`System.Data.SQLite`, which is a different library. The native call reads connection state and runs no
+statement, thus it also works while an authorizer is installed.
 
 ## Three entry points
 
@@ -37,8 +42,21 @@ using var authorizer = SqliteSecurity.InstallAuthorizer(connection, AuthorizerPo
 var check = SqliteSecurity.ValidateSingleStatement(connection, sql);
 ```
 
-`AuthorizerPolicy` has one value today, `Read`. The write policies arrive with their tools. The
-policy comes from the tool that runs, never from the deployment permission set.
+`AuthorizerPolicy` has two values, `Read` and `Write`. The DML policy of `execute_write_sql` arrives
+with that tool in Phase 6. The policy comes from the tool that runs, never from the deployment
+permission set.
+
+| Policy | Accepts | Used by |
+| --- | --- | --- |
+| `Read` | `SELECT`, `READ`, `RECURSIVE`, `FUNCTION` by name | `query` |
+| `Write` | the same, plus `INSERT`, `UPDATE`, `DELETE` | `insert` |
+
+`SQLITE_SELECT` and `SQLITE_READ` in the write policy are necessary and they are not a weakness. The
+bounded pre-count is a `SELECT`, a `CHECK` constraint reads the new row, and a foreign key reads the
+referenced table. The statement is server-authored in each case, thus the write policy never sees
+caller SQL.
+
+`SQLITE_TRANSACTION` and `SQLITE_PRAGMA` stay denied in **both** policies. See the order below.
 
 ## Order
 
@@ -57,12 +75,17 @@ flowchart TD
 on the connection handle and not on the process.
 
 **Invariant.** Install the authorizer after every server-authored statement. Each policy rejects
-`PRAGMA`, and the sidecar runs its own `PRAGMA query_only=ON`. The same rule will cover
-`BEGIN IMMEDIATE` on the write path. See
-[../plans/design/connection-policy.md](../plans/design/connection-policy.md).
+`PRAGMA`, and the sidecar runs its own `PRAGMA query_only=ON` on a read and its own
+`PRAGMA table_info` on a write.
 
-**Invariant.** Remove the authorizer and the progress handler before the handle closes. Declaration
-order gives that for free: C# disposes in the reverse order.
+**Invariant.** On the write path the authorizer also goes on **after** `BEGIN IMMEDIATE` and comes off
+**before** `COMMIT` or `ROLLBACK`, because each policy denies transaction control. The server would
+otherwise reject its own transaction. Declaration order does not give this: the write path calls
+`Dispose()` explicitly before the commit and in the `catch`. See
+[structured-writes.md](structured-writes.md).
+
+**Invariant.** Remove the authorizer and the progress handler before the handle closes. On the read
+path declaration order gives that for free: C# disposes in the reverse order.
 
 **Lesson.** Connection pooling keeps handle state, including an authorizer from an earlier
 operation. That is a privilege-escalation path: a read connection could inherit a write authorizer.

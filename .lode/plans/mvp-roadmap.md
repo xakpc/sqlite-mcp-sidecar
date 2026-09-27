@@ -15,8 +15,9 @@ Phase 0 to Phase 3 are done. Phase 2 and Phase 3 shipped together. See
 flowchart TD
     p0[Phase 0: strip the template — done] --> p1[Phase 1: configuration and auth — done]
     p1 --> p23[Phase 2+3: sandbox, query and TOON — done]
-    p23 --> p4[Phase 4: structured writes]
-    p4 --> p5[Phase 5: backup and diagnostics]
+    p23 --> p4a[Phase 4a: the write path and insert]
+    p4a --> p4b[Phase 4b: the filter, update and delete]
+    p4b --> p5[Phase 5: backup and diagnostics]
     p5 --> p6[Phase 6: danger-raw-write]
     p6 --> p7[Phase 7: container and docs]
     p7 --> p8[Phase 8: NativeAOT attempt]
@@ -78,25 +79,39 @@ codebase holds no uncalled code:
 
 | Item | Phase |
 | --- | --- |
-| The read-write connection factory | 4 |
-| The write semaphore | 4 |
+| The read-write connection factory | 4a |
+| The write semaphore | 4a |
 | The backup semaphore | 5 |
-| The write and DML authorizer policies | 4 and 6 |
+| The write and DML authorizer policies | 4a and 6 |
 
 Their design stays in [design/connection-policy.md](design/connection-policy.md).
 
-### Phase 4 — structured writes
+### Phase 4a — the write path and `insert`
 
-- `Database/StructuredWriteBuilder.cs` builds parameterized SQL.
-- Identifier validation against the live schema.
-- The filter model. See [design/structured-writes.md](design/structured-writes.md).
-- `insert`, `update`, `delete`, with mandatory `where`, `maxRows` and `requestId`.
-- `BEGIN IMMEDIATE`, the bounded pre-count and the row-limit rollback.
+- The read-write connection, with `ForeignKeys = true`. See [design/connection-policy.md](design/connection-policy.md).
+- The write semaphore, with a wait that the busy timeout bounds.
+- `AuthorizerPolicy.Write`, a second value in `Database/SqliteSecurity.cs`.
+- `Database/StructuredWriteBuilder.cs`: identifier validation against the live schema, and parameterized SQL.
 - `Security/WriteBudget.cs`, an in-memory rolling window.
 - `Security/WriteDeduplication.cs`. See [design/write-idempotency.md](design/write-idempotency.md).
+- `insert`, with a mandatory `requestId`. Three arguments, no filter and no `maxRows`.
+
+Done when: an `insert` adds one row, the same `requestId` applies it one time only, and many small
+writes return `WriteBudgetExceeded`.
+
+### Phase 4b — the filter model, `update` and `delete`
+
+- The flat filter model. See [design/structured-writes.md](design/structured-writes.md).
+- `update` and `delete`, with mandatory `where`, `maxRows` and `requestId`.
+- `BEGIN IMMEDIATE`, the bounded pre-count and the row-limit rollback.
 
 Done when: a broad filter is rejected before the write starts, an over-limit write rolls back,
-both return `WriteLimitExceeded`, and the same `requestId` applies a write one time only.
+both return `WriteLimitExceeded`, and the rows are unchanged after each rejection.
+
+**Why the split is here.** The boundary is the filter. `insert` needs no filter, no `maxRows` and no
+pre-count, thus 4a builds each control that `insert` calls and nothing more. The filter model, the
+pre-count and the rollback have their first caller in 4b. This keeps the Phase 2+3 rule: the
+codebase holds no uncalled code.
 
 ### Phase 5 — backup and diagnostics
 

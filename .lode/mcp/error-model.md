@@ -43,11 +43,11 @@ with this code. The outcome is the same and the agent must stop. See
 | `QueryRejected` | The authorizer rejected an action. | Stop. The action is not available. | `query` |
 | `QueryTimedOut` | Execution passed the query timeout. | Make the query smaller. | `query`, `schema` |
 | `ResultTooLarge` | One single row is larger than the byte budget. | Select fewer columns. | `query` |
-| `InvalidWrite` | Missing `where`, missing `maxRows`, or an invalid `requestId`. | Correct the request. | Phase 4 |
-| `WriteLimitExceeded` | The filter matched more rows than the effective limit. Nothing changed. | Narrow the filter. | Phase 4 |
-| `WriteBudgetExceeded` | The per-minute write budget is empty. | Wait, then retry. | Phase 4 |
-| `DatabaseBusy` | The busy timeout expired. Another writer holds the lock. | Retry later. | `query` |
-| `DatabaseError` | Any other SQLite failure. | Report to the operator. | `query`, `schema` |
+| `InvalidWrite` | An invalid `requestId`, an unknown table or column, a value with no SQLite equivalent, a constraint violation, or (Phase 4b) a missing `where` or `maxRows`. | Correct the request. | `insert` |
+| `WriteLimitExceeded` | The filter matched more rows than the effective limit. Nothing changed. | Narrow the filter. | Phase 4b |
+| `WriteBudgetExceeded` | The per-minute write budget is empty. | Wait, then retry with the same `requestId`. | `insert` |
+| `DatabaseBusy` | The busy timeout expired, or the write slot did not free. | Retry later with the same `requestId`. | `query`, `insert` |
+| `DatabaseError` | Any other SQLite failure. | Report to the operator. | `query`, `schema`, `insert` |
 | `BackupFailed` | The label is invalid, a backup is in progress, or the copy failed. | Report to the operator. | Phase 5 |
 
 ## Selection on the read path
@@ -79,6 +79,39 @@ it. `DatabaseError` is not.
 on the connection, thus SQLite never registers the function and reports an unknown name. Both codes
 mean that the primitive is absent. See [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md).
 
+## Selection on the write path
+
+`InvalidWrite` covers every request that the agent can correct. Four different origins reach it, and
+the agent needs no distinction: the next action is to read the schema and send a corrected request.
+
+```mermaid
+flowchart TD
+    w[Write request] --> shape{Shape}
+    shape -->|absent requestId, over 128 chars, absent table, empty values| iw[InvalidWrite]
+    shape -->|ok| dedup{requestId in the cache?}
+    dedup -->|same payload| rep[Return the stored response]
+    dedup -->|different payload| iw
+    dedup -->|no| bud{Budget left?}
+    bud -->|no| wb[WriteBudgetExceeded]
+    bud -->|yes| ident{Table and columns exist?}
+    ident -->|no, or a view| iw
+    ident -->|yes| run[Execute]
+    run --> sq{SqliteErrorCode}
+    sq -->|19 CONSTRAINT| iw
+    sq -->|5 BUSY, 6 LOCKED| db[DatabaseBusy]
+    sq -->|9 INTERRUPT| qt[QueryTimedOut]
+    sq -->|other| de[DatabaseError]
+```
+
+**A raw constraint message never goes out.** `SQLITE_CONSTRAINT` carries text that often names the
+database file, thus the agent gets fixed text that names the three constraint kinds. The detail goes to
+the log.
+
+**The write slot is a `DatabaseBusy` source and not only the SQLite busy timeout.** The wait for the
+one write slot is bounded by `BUSY_TIMEOUT_SECONDS`. From the view of the agent the cause is the same:
+another writer holds the lock, thus retry later. See
+[../database/connections.md](../database/connections.md).
+
 ## `WriteLimitExceeded` has one code for two checks
 
 A structured `update` or `delete` can fail the bounded pre-count, or it can fail the count after
@@ -88,10 +121,19 @@ same and in both cases nothing changed. The log records which check rejected the
 
 ## Errors and the idempotency cache
 
-The sidecar will cache a response only when the transaction committed. An error is never cached,
-thus `DatabaseBusy` and `WriteBudgetExceeded` stay retryable with the same `requestId`. A cached
-error would make the instruction "retry later" incorrect. See
-[../plans/design/write-idempotency.md](../plans/design/write-idempotency.md).
+The sidecar caches a response only when the transaction committed. An error is never cached, thus
+`DatabaseBusy` and `WriteBudgetExceeded` stay retryable with the same `requestId`. A cached error would
+make the instruction "retry later" incorrect.
+`WriteIdempotencyTests.ARequestIdThatFailedStaysUsable` proves it. See
+[../security/write-controls.md](../security/write-controls.md).
+
+## An absent argument must reach this model
+
+**Lesson.** A mandatory tool argument needs `= null` in the signature and validation in the method
+body. A nullable type alone is not enough: the binder of the SDK treats a parameter with no default
+value as required and throws, and the SDK then masks the message the same way it masks a thrown
+exception. The agent gets `"An error occurred invoking 'insert'."` and no code. See
+[tool-catalog.md](tool-catalog.md).
 
 ## Disclosure rules
 

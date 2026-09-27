@@ -65,14 +65,14 @@ public sealed class PermissionGatingTests
     [Fact]
     public async Task OnlyTheImplementedToolsAreExposed()
     {
-        // The write, backup, diagnostics and danger-raw-write tools arrive in later phases. A
-        // permission for one of them must not invent a tool.
+        // The backup, diagnostics and danger-raw-write tools arrive in later phases, and update and
+        // delete arrive in Phase 4b. A permission for one of them must not invent a tool.
         await using var harness = SidecarHarness.Create("schema,read,write,backup,diagnostics,danger-raw-write");
         await using var client = await harness.ConnectAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(["query", "schema"], tools.Select(t => t.Name).Order());
+        Assert.Equal(["insert", "query", "schema"], tools.Select(t => t.Name).Order());
     }
 
     [Fact]

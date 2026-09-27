@@ -12,14 +12,14 @@ flowchart TD
     root --> p[practices.md]
     root --> m[lode-map.md]
     root --> cfg[configuration/]
-    root --> sec[security/ — summary, authentication, permissions, public-endpoint]
+    root --> sec[security/ — summary, authentication, permissions, public-endpoint, write-controls]
     root --> dbd[database/]
     root --> mcpd[mcp/]
     root --> tst[testing/]
     root --> dec[decisions/]
     root --> plans[plans/]
     root --> tmp[tmp/ — git-ignored]
-    dbd --> dbs[connections.md, sqlite-sandbox.md]
+    dbd --> dbs[connections.md, sqlite-sandbox.md, structured-writes.md]
     mcpd --> mcps[tool-catalog.md, query-results.md, error-model.md]
     plans --> rm[mvp-roadmap.md]
     plans --> rt[required-tests.md]
@@ -54,19 +54,21 @@ moves out of `plans/design/` when code implements it, and it is rewritten as cur
 | [security/authentication.md](security/authentication.md) | The deployment token, the constant-time comparison, the permission claims, the identical 401, the health endpoint, the network model. |
 | [security/public-endpoint.md](security/public-endpoint.md) | The two paths and the path contract, the request budget, the middleware order, the absent host filtering, the forwarded address in a log. |
 | [security/permissions.md](security/permissions.md) | The six permissions, the read floor, the claim and policy mechanism, the two gating layers, the invariants, the risk table. |
+| [security/write-controls.md](security/write-controls.md) | The write budget, the idempotency cache, the order of the controls, the bounds, the process-state caveat. |
 
 ## database/
 
 | File | Contents |
 | --- | --- |
-| [database/connections.md](database/connections.md) | The read-only connection, `query_only`, pooling off, where the sandbox applies, the request semaphore, the filesystem constraints. |
-| [database/sqlite-sandbox.md](database/sqlite-sandbox.md) | The always-on SQLite controls, the verified native API, the allowlist authorizer, runtime limits, the one-statement rule, hard boundaries, cancellation. |
+| [database/connections.md](database/connections.md) | The read-only connection, the write connection and `ForeignKeys`, `query_only`, pooling off, where the sandbox applies, the request and write semaphores, the filesystem constraints. |
+| [database/sqlite-sandbox.md](database/sqlite-sandbox.md) | The always-on SQLite controls, the verified native API, the two allowlist policies, runtime limits, the one-statement rule, hard boundaries, cancellation. |
+| [database/structured-writes.md](database/structured-writes.md) | Why the server builds the statement, the order of an insert, identifier validation, the value table, the result shape. |
 
 ## mcp/
 
 | File | Contents |
 | --- | --- |
-| [mcp/tool-catalog.md](mcp/tool-catalog.md) | The nine tools and which exist, server registration, the stateless transport and the removed handshake, tool shape, `schema`, `query`. |
+| [mcp/tool-catalog.md](mcp/tool-catalog.md) | The nine tools and which exist, server registration, the stateless transport and the removed handshake, tool shape, the mandatory-argument lesson, `schema`, `query`, `insert`. |
 | [mcp/query-results.md](mcp/query-results.md) | The result pipeline, the `Toon.DotNet` serializer, output format, value handling, row and byte limits, truncation. |
 | [mcp/error-model.md](mcp/error-model.md) | The twelve codes, how a code reaches the agent, which reach a caller today, a selection flowchart, disclosure rules. |
 
@@ -104,9 +106,9 @@ Target design for what has no code. One topic for each file.
 | --- | --- |
 | [security-model.md](plans/design/security-model.md) | The layered security model, the guarantees list, the non-guarantees list. Start here. |
 | [threat-model.md](plans/design/threat-model.md) | Agent mistakes, mitigation map, the mistake that the MVP does not mitigate, attacker goals and blocks, logging and errors as leak surfaces. |
-| [connection-policy.md](plans/design/connection-policy.md) | The write and backup connections, `BEGIN IMMEDIATE`, busy behaviour, the write and backup semaphores. |
-| [structured-writes.md](plans/design/structured-writes.md) | `insert`, `update`, `delete`, the filter model, the bounded pre-count, the row-limit rollback, the write budget. |
-| [write-idempotency.md](plans/design/write-idempotency.md) | The mandatory `requestId`, what the cache stores, why failures are not cached, the bounds. |
+| [connection-policy.md](plans/design/connection-policy.md) | The backup connections and the backup semaphore. Everything else is current state. |
+| [structured-writes.md](plans/design/structured-writes.md) | What Phase 4b owes: `update`, `delete`, the flat filter model, the bounded pre-count, the row-limit rollback. |
+| [write-idempotency.md](plans/design/write-idempotency.md) | Only the scope table: which tools take `requestId`. The rest is current state. |
 | [raw-writes.md](plans/design/raw-writes.md) | `execute_write_sql`, what the permission bypasses and what it does not, results, budget accounting, no remote transactions. |
 | [backups.md](plans/design/backups.md) | The background backup, partial files, the runaway cap, `backup_status`, path safety, and the `diagnostics` tool. |
 | [container-and-deployment.md](plans/design/container-and-deployment.md) | Deployment shape, compose example, filesystem access, image hardening, current Dockerfile gaps, build output. |
@@ -129,7 +131,7 @@ documents go here.
 | Touch authentication | `security/authentication.md`, `security/permissions.md` |
 | Touch an endpoint, a path or a rate limit | `security/public-endpoint.md`, `plans/design/platform-deployment.md` |
 | Touch configuration | `configuration/options.md` |
-| Touch a write path | `plans/design/structured-writes.md`, `plans/design/write-idempotency.md`, `plans/design/raw-writes.md` |
+| Touch a write path | `database/structured-writes.md`, `security/write-controls.md`, then `plans/design/structured-writes.md` for what 4b still owes |
 | Write documentation | `plans/design/security-model.md`, `security/permissions.md`, `plans/design/raw-writes.md`, `decisions/` |
 | Touch the container or the launch configuration | `plans/design/container-and-deployment.md`, `testing/e2e-harness.md` |
 | Consider a new feature | `plans/out-of-scope.md`, `decisions/` |

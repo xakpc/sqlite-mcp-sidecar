@@ -30,7 +30,10 @@ documentation.
 
 - **structured write** — a write that the server builds from a table name, values and a filter. The caller sends no SQL.
 - **raw write** — a caller-supplied DML statement. It needs `danger-raw-write`.
-- **filter model** — the small set of operators that structured writes accept. It is not a SQL expression language.
+- **filter model** — the small set of operators that structured writes accept. It is not a SQL expression language. It is a flat list and not a tree.
+- **`combine`** — the value that joins each condition of a filter, `and` or `or`. The default is `and`.
+- **canonical name** — the spelling of a table or a column that the live schema holds. The server quotes this name into a statement, never the name that the caller sent.
+- **literal value** — a value that a structured write accepts: a string, a number, a boolean or null. A SQL expression is not a value.
 - **`maxRows`** — the caller-declared upper bound on affected rows. It is mandatory for structured `update` and `delete`.
 - **effective limit** — `min(client maxRows, SQLITE_SIDECAR_MAX_WRITE_ROWS)`.
 - **bounded pre-count** — the `LIMIT N+1` count that runs before a structured `update` or `delete`. It rejects a broad filter before any write.
@@ -89,5 +92,6 @@ documentation.
 - Public endpoint detail: [security/public-endpoint.md](security/public-endpoint.md)
 - Testing detail: [testing/e2e-harness.md](testing/e2e-harness.md)
 - Sandbox detail: [database/sqlite-sandbox.md](database/sqlite-sandbox.md)
-- Idempotency detail: [plans/design/write-idempotency.md](plans/design/write-idempotency.md)
+- Idempotency detail: [security/write-controls.md](security/write-controls.md)
+- Structured write detail: [database/structured-writes.md](database/structured-writes.md)
 - Result format detail: [mcp/query-results.md](mcp/query-results.md)

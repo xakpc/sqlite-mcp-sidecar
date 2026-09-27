@@ -28,6 +28,11 @@ if (!builder.Environment.IsDevelopment())
 builder.Services.AddSingleton(services => SidecarOptions.Load(services.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton<SqliteService>();
 
+// Both hold process state, thus both are singletons and both carry the same caveat: they reset at a
+// restart and two processes do not share them. That is why one sidecar serves one database.
+builder.Services.AddSingleton<WriteBudget>();
+builder.Services.AddSingleton<WriteDeduplication>();
+
 builder.Services
     .AddAuthentication(DeploymentTokenDefaults.Scheme)
     .AddScheme<AuthenticationSchemeOptions, DeploymentTokenAuthenticationHandler>(

@@ -1,49 +1,19 @@
-# Structured writes
+# Structured writes: what Phase 4b owes
 
-> **Status: planned.** This file records target design. No code implements it yet.
-> Current state is in [../../summary.md](../../summary.md). Sequence is in [../mvp-roadmap.md](../mvp-roadmap.md).
+> **Status: partly implemented.** `insert`, the write connection, the write authorizer policy,
+> identifier validation, the budget and the idempotency cache are current state. Read
+> [../../database/structured-writes.md](../../database/structured-writes.md) and
+> [../../security/write-controls.md](../../security/write-controls.md) first, including the reason that
+> the server builds the statement. This file records the design of `update`, `delete`, the filter model
+> and the bounded pre-count, which have no code.
 
-The `write` permission gives the tools `insert`, `update` and `delete`. This is the normal
-agent-facing write interface.
+The `write` permission gives `insert`, `update` and `delete`. `insert` exists.
 
-**Core contract.** The caller never supplies SQL. The server builds a parameterized statement
-from a table name, a value map and a filter. Caller SQL needs `danger-raw-write`, which is a
+**Core contract.** The caller never supplies SQL. Caller SQL needs `danger-raw-write`, which is a
 different permission. See [raw-writes.md](raw-writes.md).
 
-**Read floor.** The `write` permission is only valid together with `schema` and `read`. The
-sidecar validates identifiers against the live schema, thus an agent that cannot read the
-schema cannot use these tools correctly. See [../../security/permissions.md](../../security/permissions.md).
-
-**Scope.** The `write` permission applies to all tables in the database. There is no table
-allowlist. The README must show this in the permission risk table.
-
-## `insert`
-
-Requires `write`. The `requestId` value is mandatory. See
-[write-idempotency.md](write-idempotency.md).
-
-```json
-{
-  "requestId": "a3f1c2",
-  "table": "jobs",
-  "values": { "status": "pending", "retry": 0 }
-}
-```
-
-The server generates the statement:
-
-```sql
-INSERT INTO "jobs" ("status", "retry") VALUES ($p0, $p1);
-```
-
-The MVP inserts one row for each call.
-
-```text
-rowsAffected: 1
-```
-
-`insert` needs no filter and no `maxRows`, because one call adds exactly one row. SQLite
-`RETURNING` is available where it is useful.
+For `update` and `delete` the bounded pre-count is the load-bearing reason for the whole structured
+layer. It is constructible only because the server authored the filter.
 
 ## `update`
 
@@ -54,7 +24,7 @@ Requires `write`. The values `where`, `maxRows` and `requestId` are mandatory.
   "requestId": "a3f1c3",
   "table": "jobs",
   "values": { "retry": 1 },
-  "where": { "column": "id", "operator": "eq", "value": 41 },
+  "where": [ { "column": "id", "operator": "eq", "value": 41 } ],
   "maxRows": 1
 }
 ```
@@ -67,22 +37,25 @@ Requires `write`. The values `where`, `maxRows` and `requestId` are mandatory.
 {
   "requestId": "a3f1c4",
   "table": "jobs",
-  "where": { "column": "status", "operator": "eq", "value": "obsolete" },
+  "where": [ { "column": "status", "operator": "eq", "value": "obsolete" } ],
   "maxRows": 20
 }
 ```
 
-**Invariant.** There is no structured equivalent of `DELETE FROM jobs;`. A missing `where` or
-a missing `maxRows` is `InvalidWrite`. Reject the request before any database work.
+**Invariant.** There is no structured equivalent of `DELETE FROM jobs;`. An absent `where`, an empty
+`where` or an absent `maxRows` is `InvalidWrite`. Reject the request before any database work.
 
-**Invariant.** A committed delete is permanent. The MVP has no restore tool and no automatic
-backup. See [../../decisions/0001-no-undo-in-mvp.md](../../decisions/0001-no-undo-in-mvp.md).
+Each argument is nullable with `= null` and is validated in the method body, the same as `insert`. See
+[../../mcp/tool-catalog.md](../../mcp/tool-catalog.md).
+
+## Results
+
+`rowsAffected: 3`, as plain text. There is no `RETURNING` on a structured write. See
+[../out-of-scope.md](../out-of-scope.md).
 
 ## Filter model
 
 The filter model is deliberately small. Do not implement a general SQL expression language.
-
-Operators:
 
 ```text
 eq   ne
@@ -91,25 +64,33 @@ gt   gte
 is-null   is-not-null
 ```
 
-Logical composition: `and`, `or`.
+`is-null` and `is-not-null` take no value and they bind no parameter.
+
+The filter is a **flat list** and not a tree. One `combine` value joins each condition, and the default
+is `and`.
 
 ```json
 {
-  "and": [
+  "where": [
     { "column": "status", "operator": "eq", "value": "failed" },
     { "column": "created_at", "operator": "lt", "value": "2026-01-01" }
-  ]
+  ],
+  "combine": "and"
 }
 ```
 
-Rules:
+A flat list needs no recursive type, no self-referencing JSON schema and no depth limit. A nested
+`and`/`or` tree is not available. See [../out-of-scope.md](../out-of-scope.md).
 
-- Validate each table name and each column name against the live SQLite schema. A name that the schema does not contain is `InvalidWrite`.
-- Parameterize each value. Never put a value into the SQL text.
-- Quote identifiers after validation. Validation is the security control. Quoting is the correctness control.
+The C# shape is one record, and the SDK then publishes the operator set in the JSON schema:
 
-Schema validation is the reason that a structured write cannot reach an unexpected object.
-The authorizer is the second layer. See [sqlite-sandbox.md](../../database/sqlite-sandbox.md).
+```csharp
+public sealed record WriteCondition(string Column, string Operator, JsonElement? Value);
+```
+
+Identifier validation, the canonical-name rule, parameterization, quoting and the 90-parameter cap are
+already current state and apply unchanged to a condition column. See
+[../../database/structured-writes.md](../../database/structured-writes.md).
 
 ## Bounded writes
 
@@ -123,14 +104,15 @@ The operation uses two independent checks in one transaction.
 
 ```mermaid
 flowchart TD
-    begin[BEGIN IMMEDIATE] --> pre[Bounded pre-count, LIMIT N+1]
+    begin[BEGIN IMMEDIATE] --> authz[InstallAuthorizer, Write]
+    authz --> pre[Bounded pre-count, LIMIT N+1]
     pre --> cmp1{count <= effective limit?}
-    cmp1 -->|no| rb1[ROLLBACK, WriteLimitExceeded]
+    cmp1 -->|no| rb1[Remove authorizer, ROLLBACK, WriteLimitExceeded]
     cmp1 -->|yes| exec[Execute UPDATE or DELETE]
     exec --> count[Read rowsAffected]
     count --> cmp2{rowsAffected <= effective limit?}
-    cmp2 -->|yes| commit[COMMIT]
-    cmp2 -->|no| rb2[ROLLBACK, WriteLimitExceeded]
+    cmp2 -->|yes| commit[Remove authorizer, COMMIT]
+    cmp2 -->|no| rb2[Remove authorizer, ROLLBACK, WriteLimitExceeded]
 ```
 
 The pre-count uses a bounded subquery, thus it stops after `N + 1` rows:
@@ -139,16 +121,8 @@ The pre-count uses a bounded subquery, thus it stops after `N + 1` rows:
 SELECT COUNT(*) FROM (SELECT 1 FROM "jobs" WHERE status = $p0 LIMIT 101);
 ```
 
-**Invariant.** The transaction starts with `BEGIN IMMEDIATE`, not with `BEGIN`. A deferred
-transaction takes a read lock for the pre-count, and the write must then upgrade that lock.
-SQLite does not call the busy handler for a lock upgrade, thus the busy timeout has no effect
-and the operation fails immediately when the owning application commits first. `BEGIN
-IMMEDIATE` takes the write lock first, thus the busy timeout applies and the `DatabaseBusy`
-path operates as designed.
-
-**Invariant.** The authorizer rejects transaction control. Install it after the server runs
-`BEGIN IMMEDIATE` and remove it before the server commits or rolls back, else the server
-rejects its own transaction. See [sqlite-sandbox.md](../../database/sqlite-sandbox.md).
+The authorizer ordering, `BEGIN IMMEDIATE` and the rollback path are already current state on the
+insert path. Reuse them.
 
 **Invariant.** Both checks are necessary and they protect different things:
 
@@ -157,44 +131,28 @@ rejects its own transaction. See [sqlite-sandbox.md](../../database/sqlite-sandb
 | Pre-count | Availability of the owning application | A broad filter writes millions of rows, holds the write lock and inflates the WAL, before the rollback reverts it. |
 | Post-execution count | Data integrity | The row count changes between the pre-count and the write, because the owning application also writes. |
 
-A `LIMIT` clause on the write statement is not a substitute. A `LIMIT` writes a partial
-result silently, which is worse for an agent than a clean rejection.
+A `LIMIT` clause on the write statement is not a substitute. A `LIMIT` writes a partial result
+silently, which is worse for an agent than a clean rejection.
 
 ## Rejection message
 
-Both checks return the same code, `WriteLimitExceeded`. The message tells the agent that the
-filter matched more than the effective limit. The exact count is not available, because the
-pre-count stops at `N + 1`.
+Both checks return `WriteLimitExceeded`. The exact count is not available, because the pre-count stops
+at `N + 1`.
 
 ```text
 WriteLimitExceeded: the filter matched more than 100 rows. Narrow the filter.
 ```
 
-The log records which check rejected the operation. The agent does not receive that detail,
-because the correct next action is the same in both cases. See
-[error-model.md](../../mcp/error-model.md).
+The log records which check rejected the operation, in a `check=pre|post` field. The agent does not
+receive that detail, because the correct next action is the same in both cases.
 
-## Write-rate budget
-
-A broad filter is one failure mode. Many small valid writes are another.
-
-```text
-SQLITE_SIDECAR_MAX_WRITE_ROWS_PER_MINUTE=500
-```
-
-An in-memory counter over a rolling window is sufficient. Return `WriteBudgetExceeded` when
-the budget is empty.
-
-**Invariant.** The budget is per sidecar process. It resets at restart, and two processes
-against one database have two independent budgets. The deployment documentation must state
-that one sidecar serves one database.
-
-Count committed rows, not attempted rows. A write that rolled back changed nothing. Raw
-writes also count. See [raw-writes.md](raw-writes.md).
+**The post-execution check cannot be forced deterministically** from a test. See
+[../required-tests.md](../required-tests.md).
 
 ## Related
 
-- [write-idempotency.md](write-idempotency.md)
+- [../../database/structured-writes.md](../../database/structured-writes.md) — current state
+- [../../security/write-controls.md](../../security/write-controls.md) — the budget and the cache
 - [raw-writes.md](raw-writes.md)
 - [connection-policy.md](connection-policy.md)
-- [error-model.md](../../mcp/error-model.md)
+- [../../mcp/error-model.md](../../mcp/error-model.md)

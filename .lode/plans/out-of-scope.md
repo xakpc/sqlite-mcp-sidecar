@@ -26,6 +26,10 @@ browser UI
 
 DDL
 
+structured conflict clauses
+nested filter trees
+RETURNING on a structured write
+
 restore
 automatic backup before delete
 scheduled backups
@@ -78,6 +82,23 @@ not a goal.
 **DDL.** Schema change is the responsibility of the owning application. A sidecar that changes
 the schema can break that application, and DDL is a hard boundary in the sandbox. See
 [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md).
+
+**Structured conflict clauses.** `insert` has no `OR IGNORE`, no `OR REPLACE` and no upsert. `OR
+REPLACE` deletes the row that it replaces and it cascades into each referencing table, thus an
+`insert` would destroy data. That is the failure that the structured layer exists to prevent. An
+agent that needs conflict behaviour reads the row first, or the deployment gives it
+`danger-raw-write`. The cost is one more call. See
+[design/structured-writes.md](design/structured-writes.md).
+
+**Nested filter trees.** The structured filter is a flat condition list with one `combine` value. A
+nested `and`/`or` tree needs a recursive type and a self-referencing JSON schema, which is harder
+for an agent to fill correctly, for a shape that a second call also expresses.
+
+**`RETURNING` on a structured write.** A structured write answers `rowsAffected`, and `insert` also
+answers `rowid`. A `RETURNING` list would bring the TOON result path, a second result shape and a
+rule for a committed write that cannot report its rows. An agent reads the row with `query`.
+`execute_write_sql` does support `RETURNING`, because it already needs that path. See
+[design/raw-writes.md](design/raw-writes.md).
 
 **Restore, automatic backup before delete, retention and upload.** Restore is an operator
 action on the host. A restore tool permits a remote caller to replace the live database, which

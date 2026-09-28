@@ -40,16 +40,6 @@ internal enum StatementCheck
 }
 
 /// <summary>
-/// The statement did not pass the one-statement check, or the authorizer rejected it. The message
-/// never reaches a remote caller: the tool maps <see cref="Check"/> to an error code.
-/// </summary>
-internal sealed class StatementRejectedException(StatementCheck check)
-    : Exception($"The statement did not pass the sandbox check: {check}.")
-{
-    public StatementCheck Check { get; } = check;
-}
-
-/// <summary>
 /// The SQLite sandbox. It is the innermost security layer, it is always on, and no permission
 /// disables any part of it. <c>danger-raw-write</c> does not weaken it.
 /// </summary>

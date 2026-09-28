@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Xakpc.SQLiteMCPSidecar.Database;
+using Xakpc.SQLiteMCPSidecar.Exceptions;
 using Xakpc.SQLiteMCPSidecar.Security;
 
 namespace Xakpc.SQLiteMCPSidecar.Mcp;

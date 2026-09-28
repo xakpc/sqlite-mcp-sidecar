@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Xakpc.SQLiteMCPSidecar.Configuration;
+using Xakpc.SQLiteMCPSidecar.Exceptions;
 using Xakpc.SQLiteMCPSidecar.Security;
 using Xakpc.SQLiteMCPSidecar.Tests.Fixtures;
 using Xakpc.SQLiteMCPSidecar.Tests.Harness;

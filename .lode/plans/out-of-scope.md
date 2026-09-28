@@ -106,7 +106,7 @@ left to nest.
 answers `rowid`. A `RETURNING` list would bring the TOON result path, a second result shape and a
 rule for a committed write that cannot report its rows. An agent reads the row with `query`.
 `execute_write_sql` does support `RETURNING`, because it already needs that path. See
-[design/raw-writes.md](design/raw-writes.md).
+[../database/raw-writes.md](../database/raw-writes.md).
 
 **Restore, automatic backup before delete, retention and upload.** Restore is an operator
 action on the host. A restore tool permits a remote caller to replace the live database, which
@@ -119,7 +119,7 @@ uses a host tool.
 
 **Remote transaction sessions.** The MCP HTTP transport is stateless, and a transaction across
 calls permits one caller to hold a write lock against the owning application for an unbounded
-time. See [design/raw-writes.md](design/raw-writes.md).
+time. See [../database/raw-writes.md](../database/raw-writes.md).
 
 **Replication and clustering.** SQLite is a local file database. This is not the product.
 

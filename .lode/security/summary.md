@@ -9,11 +9,15 @@ The code that keeps an authorized but mistaken agent inside its permission set.
 | [public-endpoint.md](public-endpoint.md) | The paths, the path contract, the request budget, the absent host filtering. |
 | [write-controls.md](write-controls.md) | The write budget, the idempotency cache, the order of the controls, the bounds. |
 
-The innermost layer is in [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md). The full
-layered model and the threat model stay in
+The innermost layer is in [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md), and the
+capability that gives up the agent protections is in
+[../database/raw-writes.md](../database/raw-writes.md).
+
+Every tool of the catalog exists now, thus
 [../plans/design/security-model.md](../plans/design/security-model.md) and
-[../plans/design/threat-model.md](../plans/design/threat-model.md), because `update`, `delete` and
-`execute_write_sql` have no code yet.
+[../plans/design/threat-model.md](../plans/design/threat-model.md) describe the shipped product and not
+a target. They stay in `plans/design/` because they also carry the guarantee and non-guarantee lists
+that the Phase 7 documentation must copy.
 
 ## Layers today
 
@@ -37,6 +41,9 @@ flowchart TD
     w4 --> w5[BEGIN IMMEDIATE, then the write authorizer]
     w5 --> w6[Server-built parameterized statement, one row]
     w6 --> err
+    w3 --> r1[Raw write: the DML authorizer and the one-statement check]
+    r1 --> r2[BEGIN IMMEDIATE, then the DML authorizer again]
+    r2 --> err
 ```
 
 The budget is first on purpose: it counts a request with a wrong token too, thus a flood cannot fill
@@ -48,10 +55,17 @@ the bounded pre-count and the row-limit rollback on top, and that limit counts e
 changes, a cascade and a trigger included. See
 [../database/structured-writes.md](../database/structured-writes.md).
 
+**`execute_write_sql` removes only the structured branch**, `w4` to `w6`. It keeps the token, the
+policy, the idempotency cache, the write budget, both slots, the baseline, the authorizer, the
+one-statement check and the disclosure rules. That is the whole meaning of `danger-raw-write`: it buys
+raw DML and it buys no administration and no file access. See
+[../database/raw-writes.md](../database/raw-writes.md).
+
 ## Related
 
 - [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md)
 - [../mcp/error-model.md](../mcp/error-model.md)
 - [../configuration/options.md](../configuration/options.md)
 - [../mcp/tool-catalog.md](../mcp/tool-catalog.md)
+- [../database/raw-writes.md](../database/raw-writes.md)
 - [../decisions/](../decisions/)

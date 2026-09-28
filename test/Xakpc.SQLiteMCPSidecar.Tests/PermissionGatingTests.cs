@@ -65,15 +65,15 @@ public sealed class PermissionGatingTests
     [Fact]
     public async Task OnlyTheImplementedToolsAreExposed()
     {
-        // execute_write_sql arrives in Phase 6. The danger-raw-write permission must not invent it, and
-        // backup_status must never appear: MCP Tasks carries the backup outcome instead of a second tool.
+        // The whole catalog, and nothing else. backup_status must never appear: MCP Tasks carries the
+        // backup outcome instead of a second tool.
         await using var harness = SidecarHarness.Create("schema,read,write,backup,diagnostics,danger-raw-write");
         await using var client = await harness.ConnectAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            ["backup", "delete", "diagnostics", "insert", "query", "schema", "update"],
+            ["backup", "delete", "diagnostics", "execute_write_sql", "insert", "query", "schema", "update"],
             tools.Select(t => t.Name).Order());
     }
 

@@ -1,8 +1,23 @@
 # Write controls: the budget and the idempotency cache
 
-Current state. Both exist, and `insert`, `update` and `delete` all call both through one shared path,
-`SqliteTools.RunStructuredWriteAsync`. That method owns the order of the controls, thus the order
-cannot drift between one write tool and another.
+Current state. Both exist, and every write tool calls both through one shared path,
+`SqliteTools.RunWriteAsync`. That method owns the order of the controls, thus the order cannot drift
+between one write tool and another.
+
+| Tool | `requestId` | Canonical payload |
+| --- | --- | --- |
+| `insert` | mandatory | the tool name, the table and the ordered values |
+| `update`, `delete` | mandatory | the same, plus the filter and `maxRows` |
+| `execute_write_sql` | mandatory | the tool name and the trimmed statement |
+| `query`, `schema`, `diagnostics` | not used | — |
+| `backup` | not used | — |
+
+A read needs no deduplication, because a repeated read changes nothing. `backup` needs none, because
+the file name carries a timestamp and a repeated backup costs disk space only. See
+[../database/backups.md](../database/backups.md).
+
+There is **one** budget counter for structured writes and raw writes. One counter is easier to explain
+than two regimes, and the budget is a resource control on the database.
 
 Code: `src/Xakpc.SQLiteMCPSidecar/Security/WriteBudget.cs`,
 `src/Xakpc.SQLiteMCPSidecar/Security/WriteDeduplication.cs`.
@@ -101,7 +116,8 @@ The entry holds a SHA-256 hash and never the canonical text, thus the cache hold
 
 ## Related
 
-- [../database/structured-writes.md](../database/structured-writes.md) — the caller of both controls
-- [../plans/design/write-idempotency.md](../plans/design/write-idempotency.md) — the remaining design
+- [../database/structured-writes.md](../database/structured-writes.md) — a caller of both controls
+- [../database/raw-writes.md](../database/raw-writes.md) — the other caller
+- [../decisions/0003-mandatory-idempotency-key.md](../decisions/0003-mandatory-idempotency-key.md)
 - [../mcp/error-model.md](../mcp/error-model.md)
 - [permissions.md](permissions.md)

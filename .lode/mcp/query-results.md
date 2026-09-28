@@ -6,6 +6,13 @@ data.
 **TOON is for row data only.** The `schema` tool returns DDL text and no TOON. See
 [tool-catalog.md](tool-catalog.md).
 
+**Two tools use this pipeline:** `query`, and `execute_write_sql` for the rows of a `RETURNING` clause.
+The limits and the output are identical, and one behaviour differs: a raw write commits even when the
+result truncates, thus it never returns `ResultTooLarge`. The reader is drained after the bounded read,
+because `RETURNING` rows arrive while the write runs. See
+[../database/raw-writes.md](../database/raw-writes.md) and
+[../decisions/0008-a-committed-raw-write-never-fails-on-result-size.md](../decisions/0008-a-committed-raw-write-never-fails-on-result-size.md).
+
 Code: `src/Xakpc.SQLiteMCPSidecar/Database/QueryResult.cs`.
 
 ## Pipeline
@@ -102,6 +109,10 @@ low.
 budget. There is no useful partial result then, because the sidecar cannot send a part of a row. The
 agent must select fewer columns.
 
+**Only `query` returns that code.** `QueryResult` reports the same condition for a `RETURNING` clause,
+and `execute_write_sql` answers with `rowsAffected` and a line that says the rows were not returned:
+the write already committed, thus a failure code would be a lie.
+
 Unlimited result streaming into an agent context is not permitted. An unbounded result empties the
 agent context window and the sidecar memory at the same time.
 
@@ -119,3 +130,4 @@ normal truncation.
 - [error-model.md](error-model.md)
 - [../configuration/options.md](../configuration/options.md)
 - [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md)
+- [../database/raw-writes.md](../database/raw-writes.md)

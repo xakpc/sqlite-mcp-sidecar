@@ -22,7 +22,7 @@ capable, it is the tighter bound.
 be atomic across a disjunction. The sidecar already offers no cross-call atomicity: the MCP transport
 is stateless and remote transaction sessions are out of scope. Splitting a disjunction into two calls
 therefore concedes nothing that the product ever offered. See
-[../plans/design/raw-writes.md](../plans/design/raw-writes.md).
+[../database/raw-writes.md](../database/raw-writes.md).
 
 **One fewer argument to fill in wrong.** The tool description is the only thing the agent reads. Each
 argument it describes competes for attention with the ones that carry a guarantee, `where` and

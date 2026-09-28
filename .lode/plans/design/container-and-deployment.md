@@ -19,7 +19,7 @@ flowchart TD
 ```
 
 Both containers mount the same local volume. The database file must stay on a local
-filesystem. See [connection-policy.md](connection-policy.md).
+filesystem. See [../../database/connections.md](../../database/connections.md).
 
 The proxy may face the public internet. The Kamal and Coolify recipes, the path contract and the
 proxy options are in [platform-deployment.md](platform-deployment.md).

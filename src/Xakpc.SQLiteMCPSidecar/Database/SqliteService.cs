@@ -5,6 +5,24 @@ using Xakpc.SQLiteMCPSidecar.Exceptions;
 
 namespace Xakpc.SQLiteMCPSidecar.Database;
 
+/// <summary>
+/// The two row counts that every committed write reports. The shared write path in
+/// <c>SqliteTools</c> needs them from a structured write and from a raw write alike.
+/// </summary>
+/// <remarks>
+/// <see cref="RowsChanged"/> and not <see cref="RowsAffected"/> is what the write budget counts: a
+/// cascaded row and a row that a trigger wrote are real write volume. See
+/// <c>.lode/decisions/0004-maxrows-bounds-total-changes.md</c>.
+/// </remarks>
+public interface IWriteOutcome
+{
+    /// <summary>The rows of the target table that the statement changed.</summary>
+    int RowsAffected { get; }
+
+    /// <summary>Every row that the statement changed, a cascade and a trigger included.</summary>
+    int RowsChanged { get; }
+}
+
 /// <summary>The outcome of a committed structured write.</summary>
 /// <param name="RowsAffected">The rows of the target table that the statement changed.</param>
 /// <param name="RowId">The rowid of an inserted row. It is 0 for an update and a delete.</param>
@@ -13,7 +31,16 @@ namespace Xakpc.SQLiteMCPSidecar.Database;
 /// and the rows that a trigger wrote. This is the number that <c>maxRows</c> bounds and the number
 /// that the write budget counts.
 /// </param>
-public sealed record StructuredWriteResult(int RowsAffected, long RowId, int RowsChanged);
+public sealed record StructuredWriteResult(int RowsAffected, long RowId, int RowsChanged) : IWriteOutcome;
+
+/// <summary>The outcome of a committed raw write.</summary>
+/// <param name="RowsAffected">The rows of the target table that the statement changed.</param>
+/// <param name="RowsChanged">Every row that the statement changed. The write budget counts it.</param>
+/// <param name="Rows">
+/// The rows of a <c>RETURNING</c> clause, or <c>null</c> when the statement produced no columns. The
+/// same bounded pipeline as the <c>query</c> tool builds it.
+/// </param>
+public sealed record RawWriteResult(int RowsAffected, int RowsChanged, QueryResult? Rows) : IWriteOutcome;
 
 /// <summary>The fixed diagnostic value set. Read-only, and never extended with a caller-chosen pragma.</summary>
 /// <param name="SqliteVersion">The SQLite library version of this sidecar, not of the owning application.</param>
@@ -373,6 +400,107 @@ public sealed class SqliteService : IDisposable
             await RunServerStatementAsync(connection, "COMMIT;", token).ConfigureAwait(false);
 
             return new StructuredWriteResult(rowsAffected, 0, rowsChanged);
+        }
+        catch
+        {
+            authorizer.Dispose();
+            await RollbackQuietlyAsync(connection).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Runs one caller-supplied DML statement inside the sandbox. It needs <c>danger-raw-write</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The step order is the security contract, and it differs from <see cref="MutateAsync"/> in one
+    /// way: the statement is validated <b>before</b> <c>BEGIN IMMEDIATE</c>. A statement that the
+    /// sandbox refuses therefore never takes the write lock and never holds the owning application. The
+    /// structured path cannot do the same, because its pre-count must read inside the transaction that
+    /// then writes.
+    /// </para>
+    /// <para>
+    /// The authorizer is installed two times on purpose. The first scope covers the preparation that
+    /// proves one statement, and the second covers the execution, which prepares the statement again.
+    /// Neither scope is redundant: the authorizer is what rejects DDL, <c>ATTACH</c>, <c>PRAGMA</c> and
+    /// transaction control, and the second one is the scope that a future change could not bypass by
+    /// removing the early check.
+    /// </para>
+    /// <para>
+    /// <b>Invariant.</b> The reader is drained to completion before the commit. A <c>RETURNING</c>
+    /// clause produces its rows while the write progresses, thus a reader that stopped at the row limit
+    /// or the byte limit would leave the write half applied. The bounded read gives the agent what fits
+    /// and the drain gives the database the whole write.
+    /// </para>
+    /// <para>
+    /// <b>Invariant.</b> The result size never fails a raw write. The statement has already run when
+    /// the rows are read, thus a truncated result commits and reports <c>truncated: true</c>. See
+    /// <c>.lode/decisions/0008-a-committed-raw-write-never-fails-on-result-size.md</c>.
+    /// </para>
+    /// <para>
+    /// No <c>maxRows</c> and no pre-count. That is what the permission buys, and it is why the
+    /// permission is named <c>danger-raw-write</c>. See <c>.lode/database/raw-writes.md</c>.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="StatementRejectedException">
+    /// The text is not exactly one statement, or the authorizer rejected it.
+    /// </exception>
+    public async Task<RawWriteResult> ExecuteWriteSqlAsync(string sql, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(_options.QueryTimeoutSeconds));
+        var token = timeout.Token;
+
+        await using var connection = await OpenReadWriteAsync(token).ConfigureAwait(false);
+        using var interrupt = SqliteSecurity.RegisterInterrupt(connection, token);
+
+        // Before the transaction: a rejected statement must not take the write lock.
+        using (SqliteSecurity.InstallAuthorizer(connection, AuthorizerPolicy.Dml))
+        {
+            var check = SqliteSecurity.ValidateSingleStatement(connection, sql);
+            if (check != StatementCheck.Ok)
+            {
+                throw new StatementRejectedException(check);
+            }
+        }
+
+        await RunServerStatementAsync(connection, "BEGIN IMMEDIATE;", token).ConfigureAwait(false);
+        var authorizer = SqliteSecurity.InstallAuthorizer(connection, AuthorizerPolicy.Dml);
+        try
+        {
+            int rowsAffected;
+            int rowsChanged;
+            QueryResult? rows = null;
+
+            var changesBefore = SqliteSecurity.TotalChanges(connection);
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText = sql;
+
+                // A reader and not ExecuteNonQuery: a RETURNING clause produces rows, and the native
+                // counters give the row counts that ExecuteNonQuery would have returned.
+                await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+                if (reader.FieldCount > 0)
+                {
+                    rows = await QueryResult.ReadAsync(reader, _options, token).ConfigureAwait(false);
+
+                    // The drain. See the invariant above: the write is complete only when the reader is.
+                    while (await reader.ReadAsync(token).ConfigureAwait(false))
+                    {
+                    }
+                }
+
+                rowsAffected = SqliteSecurity.Changes(connection);
+                rowsChanged = SqliteSecurity.TotalChanges(connection) - changesBefore;
+            }
+
+            authorizer.Dispose();
+            await RunServerStatementAsync(connection, "COMMIT;", token).ConfigureAwait(false);
+
+            return new RawWriteResult(rowsAffected, rowsChanged, rows);
         }
         catch
         {

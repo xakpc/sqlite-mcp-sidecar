@@ -75,7 +75,7 @@ deleting one row that has three cascading children needs a `maxRows` of at least
 The description of `where` must name the eight operators. The generated schema types them as a plain
 string, thus the text is the only place the agent can read the set.
 
-**The three write tools share one private path**, `RunStructuredWriteAsync`. It holds the order of the
+**Every write tool shares one private path**, `RunWriteAsync`. It holds the order of the
 controls — deduplication, budget, request slot, write slot, execute, charge, cache — thus the order
 cannot drift between one tool and another. Each tool method owns only its own shape validation and its
 result format.

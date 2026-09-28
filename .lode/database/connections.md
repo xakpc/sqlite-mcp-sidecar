@@ -57,6 +57,10 @@ difference from `OpenReadOnlyAsync`.
 **Invariant.** Only a write operation opens it. A read opens the read-only connection also when the
 deployment has write permissions.
 
+`execute_write_sql` adds **no new connection kind**. It opens this same connection and takes the same
+write slot, and it differs only in its authorizer policy, which is `AuthorizerPolicy.Dml`. See
+[raw-writes.md](raw-writes.md).
+
 **Invariant.** `ForeignKeys = true`. SQLite defaults foreign key enforcement to **off**, and the
 setting belongs to the connection and not to the database file. It is therefore not on the list of
 settings that the owning application owns, further below. A write that breaks referential integrity is
@@ -124,6 +128,7 @@ writes it. See [../configuration/options.md](../configuration/options.md).
 
 - [backups.md](backups.md) — the backup source and destination connections
 - [diagnostics.md](diagnostics.md)
-- [../plans/design/connection-policy.md](../plans/design/connection-policy.md) — what is still unbuilt
+- [structured-writes.md](structured-writes.md) — the writers that use the write connection
+- [raw-writes.md](raw-writes.md)
 - [sqlite-sandbox.md](sqlite-sandbox.md)
 - [../mcp/tool-catalog.md](../mcp/tool-catalog.md)

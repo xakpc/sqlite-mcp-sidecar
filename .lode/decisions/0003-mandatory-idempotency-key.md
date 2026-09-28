@@ -34,5 +34,5 @@ instructions.
 
 ## Related
 
-- [../plans/design/write-idempotency.md](../plans/design/write-idempotency.md)
+- [../security/write-controls.md](../security/write-controls.md)
 - [../mcp/error-model.md](../mcp/error-model.md)

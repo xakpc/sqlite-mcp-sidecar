@@ -29,7 +29,9 @@ documentation.
 ## Writes
 
 - **structured write** — a write that the server builds from a table name, values and a filter. The caller sends no SQL.
-- **raw write** — a caller-supplied DML statement. It needs `danger-raw-write`.
+- **raw write** — a caller-supplied DML statement. It needs `danger-raw-write`. It carries no filter model, no `maxRows`, no pre-count and no rollback.
+- **`sqlHash`** — the SHA-256 hash of a raw write request. It is the log identifier of the statement, because the statement text itself is row data.
+- **drain** — the read of the remaining rows of a `RETURNING` clause after the bounded result is built. A `RETURNING` clause produces rows while the write runs, thus a reader that stops at a limit leaves the write half applied.
 - **filter model** — the small set of operators that structured writes accept. It is not a SQL expression language. It is a flat list and not a tree, and every condition joins with `and`. There is no `or`.
 - **condition** — one item of a filter: a column, an operator and, for a comparison, a value.
 - **canonical name** — the spelling of a table or a column that the live schema holds. The server quotes this name into a statement, never the name that the caller sent.
@@ -68,6 +70,9 @@ documentation.
 - **runtime limit** — a per-connection `sqlite3_limit` value, for example SQL length or VDBE operation count.
 - **baseline** — the settings that `SqliteSecurity.ApplyBaseline` puts on a handle after each `Open`.
 - **allowlist policy** — the authorizer rule that accepts a named few actions and rejects each other one.
+- **authorizer policy** — the value that selects the allowlist of one operation: `Read`, `Write` or `Dml`. It comes from the tool that runs, never from the deployment permission set.
+- **DML policy** — `AuthorizerPolicy.Dml`, the policy of `execute_write_sql`. It is the write policy plus the rejection of DML against an `sqlite_%` object. It is the only policy that sees caller SQL on a write connection.
+- **internal object** — a table whose name starts with `sqlite_`, for example `sqlite_master` and `sqlite_sequence`. No write reaches one.
 - **interrupt** — the `sqlite3_interrupt` call that stops a running statement on timeout or cancellation.
 - **progress handler** — the callback that reports cancellation from inside the virtual machine. It is the second stop path.
 - **one-statement check** — the preparation that proves the caller sent exactly one statement. A non-empty `tail` is a second statement.
@@ -102,4 +107,5 @@ documentation.
 - Backup detail: [database/backups.md](database/backups.md)
 - Diagnostics detail: [database/diagnostics.md](database/diagnostics.md)
 - Structured write detail: [database/structured-writes.md](database/structured-writes.md)
+- Raw write detail: [database/raw-writes.md](database/raw-writes.md)
 - Result format detail: [mcp/query-results.md](mcp/query-results.md)

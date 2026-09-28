@@ -1,7 +1,7 @@
 # MCP tool catalog
 
-The sidecar has one MCP endpoint at `/db/mcp` over Streamable HTTP. The catalog has eight tools at
-most, and seven of them exist. The path is the whole public path on purpose. See
+The sidecar has one MCP endpoint at `/db/mcp` over Streamable HTTP. The catalog has eight tools and
+every one of them exists. The path is the whole public path on purpose. See
 [../security/public-endpoint.md](../security/public-endpoint.md).
 
 Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidecar/Program.cs`.
@@ -15,12 +15,11 @@ Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidec
 | `delete` | `write` | no | mandatory | **Implemented** |
 | `backup` | `backup` | no | no | **Implemented**, task-mode |
 | `diagnostics` | `diagnostics` | no | no | **Implemented** |
-| `execute_write_sql` | `danger-raw-write` | yes, DML | mandatory | Phase 6 |
+| `execute_write_sql` | `danger-raw-write` | yes, DML | mandatory | **Implemented** |
 
-A permission that has no tool yet exposes nothing.
 `PermissionGatingTests.OnlyTheImplementedToolsAreExposed` starts a deployment with every permission
-and asserts that `tools/list` holds `schema`, `query`, `insert`, `update`, `delete`, `backup` and
-`diagnostics` only. `backup_status` must never appear: MCP Tasks carries the backup outcome. See
+and asserts that `tools/list` holds these eight names and nothing else. `backup_status` must never
+appear: MCP Tasks carries the backup outcome. See
 [../decisions/0007-tasks-over-a-status-tool.md](../decisions/0007-tasks-over-a-status-tool.md).
 
 Adding a tool needs no name list anywhere. `AddAuthorizationFilters()` reads the `[Authorize]`
@@ -95,7 +94,7 @@ next. This is verified by hand in `src/Xakpc.SQLiteMCPSidecar/mcp.http`.
 Stateless mode disables the GET and DELETE endpoints and every server-to-client request, thus
 sampling, elicitation and roots are unavailable. The sidecar needs none of them. Statelessness also
 agrees with the no-remote-transaction rule in
-[../plans/design/raw-writes.md](../plans/design/raw-writes.md).
+[../database/raw-writes.md](../database/raw-writes.md).
 
 `HttpServerTransportOptions.Stateless` is a convenience proxy over `SessionMode` and it is not
 obsolete. `SessionMode` is the fuller API, thus the code uses it.
@@ -157,10 +156,38 @@ The rows are TOON. See [query-results.md](query-results.md). The rejections are 
 Three, four and five arguments. The caller sends no SQL: the server builds one parameterized
 statement. Every mandatory argument carries `= null` and is validated in the method body, thus the
 generated schema marks nothing required and the description carries the requirement instead. All three
-share one private path, `RunStructuredWriteAsync`, which owns the order of the controls.
+share one private path, `RunWriteAsync`, which owns the order of the controls.
 
 See [write-tool-arguments.md](write-tool-arguments.md) and
 [../database/structured-writes.md](../database/structured-writes.md).
+
+## `execute_write_sql`
+
+```csharp
+public const string RawWriteToolName = "execute_write_sql";
+
+[McpServerTool(Name = RawWriteToolName)]
+[Authorize(Policy = "perm:danger-raw-write")]
+public async Task<CallToolResult> ExecuteWriteSqlAsync(
+    string? requestId = null, string? sql = null, CancellationToken cancellationToken = default)
+```
+
+Two arguments, and **no parameter list**, for the same reason as `query`: a caller that holds this
+permission already writes the statement. It runs through the same `RunWriteAsync` path as the three
+structured tools, thus the order of the controls exists one time.
+
+```text
+rowsAffected: 2
+
+rows[2]{id,retry}:
+  41,3
+  52,2
+
+truncated: false
+```
+
+The TOON block is present only for a statement with a `RETURNING` clause. See
+[../database/raw-writes.md](../database/raw-writes.md).
 
 ## `backup`
 
@@ -198,6 +225,7 @@ information leak. See [../database/diagnostics.md](../database/diagnostics.md).
 ## Related
 
 - [../database/structured-writes.md](../database/structured-writes.md)
+- [../database/raw-writes.md](../database/raw-writes.md)
 - [../database/backups.md](../database/backups.md)
 - [../database/diagnostics.md](../database/diagnostics.md)
 - [schema-output.md](schema-output.md)

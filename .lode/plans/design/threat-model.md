@@ -1,10 +1,11 @@
 # Threat model
 
-> **Status: partly implemented.** The read-path mitigations have code: the sandbox, the row and byte
-> limits, the timeout with the interrupt, the concurrency semaphore and the disclosure rules. See
-> [../../database/sqlite-sandbox.md](../../database/sqlite-sandbox.md) and
-> [../../mcp/query-results.md](../../mcp/query-results.md). Each write mitigation is still target
-> design. Sequence is in [../mvp-roadmap.md](../mvp-roadmap.md).
+> **Status: implemented.** Every mitigation of this model has code, on the read path and on both write
+> paths. See [../../database/sqlite-sandbox.md](../../database/sqlite-sandbox.md),
+> [../../mcp/query-results.md](../../mcp/query-results.md),
+> [../../database/structured-writes.md](../../database/structured-writes.md) and
+> [../../database/raw-writes.md](../../database/raw-writes.md). The file stays here because the
+> mitigation map is what the Phase 7 documentation copies from.
 
 The sidecar defends against two callers. The second one is unusual and it drives most of the
 product design.

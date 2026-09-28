@@ -12,7 +12,7 @@ prove the shipped behaviour.
 
 These are mandatory. Each statement must fail remotely, **also** with `danger-raw-write`.
 
-The list runs in `SandboxBoundaryTests` through the `query` tool, and Phase 6 runs it again through
+The list runs two times in `SandboxBoundaryTests`: through the `query` tool and through
 `execute_write_sql`. Two codes appear, and both mean that the action is not available:
 
 ```text
@@ -96,22 +96,41 @@ requestId over 128 characters   -> InvalidWrite                            done
 a replayed write costs no budget                                           done
 ```
 
-Raw write tests:
+Raw write tests. The list is complete, in `RawWriteToolTests` and `SandboxBoundaryTests`:
 
 ```text
-raw INSERT succeeds with danger-raw-write
-raw UPDATE succeeds with danger-raw-write
-raw DELETE succeeds with danger-raw-write
+raw INSERT succeeds with danger-raw-write                  done
+raw UPDATE succeeds with danger-raw-write                  done
+raw DELETE succeeds with danger-raw-write                  done
 
-raw write rejected without danger-raw-write
-raw write without requestId rejected
-raw write rows count toward the budget
+raw write rejected without danger-raw-write                done, absent from the list and on a direct call
+raw write without requestId rejected                       done
+raw write without sql rejected                             done
+raw write rows count toward the budget                     done
+the same requestId applies the statement one time          done
+the same requestId with a new statement -> InvalidWrite    done
+a constraint violation -> InvalidWrite, no path disclosed  done
 
-raw DROP rejected
-raw ATTACH rejected
-raw PRAGMA mutation rejected
-raw transaction control rejected
+raw DROP, ALTER, CREATE rejected                           done
+raw ATTACH and DETACH rejected                             done
+raw PRAGMA mutation rejected                               done
+raw transaction control rejected                           done
+raw DML against sqlite_sequence rejected                   done
+more than one statement -> InvalidQuery                    done
+VACUUM and VACUUM INTO fail and write no file              done
+a rejected raw write changes nothing                       done
 ```
+
+**A truncated `RETURNING` result must still apply the whole write.**
+`RawWriteToolTests.ATruncatedReturningResultStillAppliesTheWholeWrite` sets `MAX_ROWS=1`, deletes three
+rows with `RETURNING id`, and asserts one row in the answer and zero rows left in the table. Remove the
+reader drain in `SqliteService.ExecuteWriteSqlAsync` and that test fails. It is the only test of a
+half-applied write, because no error code reports one. See
+[../decisions/0008-a-committed-raw-write-never-fails-on-result-size.md](../decisions/0008-a-committed-raw-write-never-fails-on-result-size.md).
+
+**`UPDATE sqlite_sequence` needs a fixture table with `AUTOINCREMENT`.** SQLite creates
+`sqlite_sequence` only for such a table, and `events` in `sample-db.sql` exists for this test. Without
+it the statement would fail as an unknown table and prove nothing about the DML policy.
 
 ## Required endpoint tests
 
@@ -184,22 +203,18 @@ milliseconds. The restart cap itself was proven by hand against a 17 MiB databas
 write, which abandoned after 50 restarts in 823 ms. See
 [../decisions/0006-backup-restart-cap.md](../decisions/0006-backup-restart-cap.md).
 
-Each remaining item belongs to its phase:
+The raw write list is complete too. `RawWriteToolTests` covers the raw `INSERT`, `UPDATE`, `DELETE` and
+`UPDATE ... RETURNING` cases, and the three deployment shapes each have a test that asserts which tools
+the permission set exposes.
+
+These items have no test of their own, and each one is covered as a side effect elsewhere:
 
 ```text
-raw INSERT
-raw UPDATE
-raw DELETE
-raw UPDATE RETURNING
-
-read-only deployment
-structured-write deployment
-danger-raw-write deployment
-
-SQLITE_BUSY behavior
-query timeout
-concurrency limiting
+SQLITE_BUSY behavior     the write slot returns DatabaseBusy; no test forces a real lock conflict
+concurrency limiting     the request semaphore has no test that saturates it
 ```
+
+`query timeout` is covered: `QueryToolTests` proves that a runaway query returns `QueryTimedOut`.
 
 **A WAL database and a rollback-journal database are both covered now.** They were not before:
 `sample-db.sql` sets `PRAGMA journal_mode = WAL`, and the fixture applied the requested mode before

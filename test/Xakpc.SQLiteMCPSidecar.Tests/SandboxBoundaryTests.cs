@@ -13,13 +13,13 @@ namespace Xakpc.SQLiteMCPSidecar.Tests;
 /// and not sufficient.
 /// </para>
 /// <para>
-/// Phase 6 runs this same list again under <c>danger-raw-write</c> through
-/// <c>execute_write_sql</c>: <c>danger-raw-write</c> is raw DML inside this sandbox and not
-/// unrestricted SQLite.
+/// The same list runs a second time under <c>danger-raw-write</c> through <c>execute_write_sql</c>:
+/// <c>danger-raw-write</c> is raw DML inside this sandbox and not unrestricted SQLite.
 /// </para>
 /// </remarks>
 public sealed class SandboxBoundaryTests
 {
+    private const string RawPermissions = "schema,read,danger-raw-write";
     /// <summary>
     /// A caller cannot reach another file, change the schema, change a pragma or run native code.
     /// </summary>
@@ -49,6 +49,114 @@ public sealed class SandboxBoundaryTests
 
         Assert.NotNull(failure);
         Assert.Contains("QueryRejected", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The same list through <c>execute_write_sql</c>. The permission buys raw DML and it buys no
+    /// administration, no file access and no schema change.
+    /// </summary>
+    /// <remarks>
+    /// Two codes appear and both mean that the action is not available. <c>QueryRejected</c> comes from
+    /// the authorizer, and <c>InvalidQuery</c> comes from a statement that does not compile at all, for
+    /// example <c>DETACH DATABASE x</c> with no attached database. The assertion accepts either, because
+    /// a stricter one would fail on a safe SQLite change.
+    /// </remarks>
+    [Theory]
+    [InlineData("ATTACH DATABASE '/tmp/x.db' AS x")]
+    [InlineData("DETACH DATABASE x")]
+    [InlineData("CREATE TABLE hacked(id)")]
+    [InlineData("DROP TABLE jobs")]
+    [InlineData("ALTER TABLE jobs ADD COLUMN sneaky TEXT")]
+    [InlineData("PRAGMA writable_schema = ON")]
+    [InlineData("PRAGMA journal_mode = OFF")]
+    // Transaction control belongs to the server. A remote transaction would hold the write lock of the
+    // owning application over more than one MCP call.
+    [InlineData("BEGIN IMMEDIATE")]
+    [InlineData("COMMIT")]
+    [InlineData("ROLLBACK")]
+    // A write to SQLite internal state is not data manipulation of the caller's own rows.
+    [InlineData("UPDATE sqlite_sequence SET seq = 0 WHERE name = 'events'")]
+    [InlineData("DELETE FROM sqlite_sequence")]
+    public async Task TheStatementIsRejectedForARawWriteToo(string sql)
+    {
+        await using var harness = SidecarHarness.Create(RawPermissions);
+        await using var client = await harness.ConnectAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var failure = await Record.ExceptionAsync(
+            () => RawWriteToolTests.CallExecuteWriteSqlAsync(client, InsertToolTests.NewRequestId(), sql));
+
+        Assert.NotNull(failure);
+        Assert.True(
+            failure.Message.Contains("QueryRejected", StringComparison.Ordinal)
+            || failure.Message.Contains("InvalidQuery", StringComparison.Ordinal),
+            $"Expected a sidecar rejection code, and the message was: {failure.Message}");
+    }
+
+    /// <summary>
+    /// One statement for each raw write request, exactly as for a query. A pair of legal DML statements
+    /// is the case that matters: the first one alone would be accepted.
+    /// </summary>
+    [Theory]
+    [InlineData("UPDATE jobs SET retry = 1 WHERE id = -1; DELETE FROM logs")]
+    [InlineData("DELETE FROM jobs WHERE id = -1; DROP TABLE jobs")]
+    public async Task MoreThanOneStatementIsRejectedForARawWrite(string sql)
+    {
+        await using var harness = SidecarHarness.Create(RawPermissions);
+        await using var client = await harness.ConnectAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var failure = await Record.ExceptionAsync(
+            () => RawWriteToolTests.CallExecuteWriteSqlAsync(client, InsertToolTests.NewRequestId(), sql));
+
+        Assert.NotNull(failure);
+        Assert.Contains("InvalidQuery", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>VACUUM</c> and <c>VACUUM INTO</c> both fail on the raw write path, and no file appears.
+    /// </summary>
+    /// <remarks>
+    /// <b>The mechanism here is the transaction and not the authorizer.</b> SQLite runs no authorizer
+    /// callback for <c>VACUUM</c>, which is the same reason the lode says the action code of
+    /// <c>VACUUM INTO</c> is not dependable, thus the statement prepares. It then fails at execution
+    /// with "cannot VACUUM from within a transaction", because every raw write runs inside
+    /// <c>BEGIN IMMEDIATE</c>. The code is therefore <c>DatabaseError</c> and not <c>QueryRejected</c>.
+    /// The fact that matters is the one this test asserts: no file is written.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task VacuumIsRejectedForARawWriteAndWritesNoFile(bool into)
+    {
+        await using var harness = SidecarHarness.Create(RawPermissions);
+        await using var client = await harness.ConnectAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var target = Path.Combine(Path.GetTempPath(), $"sidecar-raw-vacuum-probe-{Guid.NewGuid():N}.db");
+        var sql = into ? $"VACUUM INTO '{target.Replace("\\", "/")}'" : "VACUUM";
+
+        var failure = await Record.ExceptionAsync(
+            () => RawWriteToolTests.CallExecuteWriteSqlAsync(client, InsertToolTests.NewRequestId(), sql));
+
+        Assert.NotNull(failure);
+        Assert.False(File.Exists(target), "VACUUM INTO must not write a file.");
+    }
+
+    /// <summary>
+    /// A rejected raw write leaves the rows alone. The statement is validated before
+    /// <c>BEGIN IMMEDIATE</c>, thus it never takes the write lock either.
+    /// </summary>
+    [Fact]
+    public async Task ARejectedRawWriteChangesNothing()
+    {
+        await using var harness = SidecarHarness.Create(RawPermissions);
+        await using var client = await harness.ConnectAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var before = await QueryToolTests.CallQueryAsync(client, "SELECT count(*) AS n FROM jobs");
+
+        var failure = await Record.ExceptionAsync(() => RawWriteToolTests.CallExecuteWriteSqlAsync(
+            client, InsertToolTests.NewRequestId(), "DROP TABLE jobs"));
+
+        Assert.NotNull(failure);
+        Assert.Equal(before, await QueryToolTests.CallQueryAsync(client, "SELECT count(*) AS n FROM jobs"));
     }
 
     /// <summary>

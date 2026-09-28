@@ -104,7 +104,7 @@ and an agent reaches the backstop rarely. A `AddCallToolFilter` that maps the re
 
 - No permission grants another permission. `read` does not grant `write`.
 - `write` and `danger-raw-write` require `schema` and `read`. Startup enforces this.
-- `write` never accepts caller-supplied SQL. Only `danger-raw-write` does.
+- `write` never accepts caller-supplied SQL. Only `danger-raw-write` does, through `execute_write_sql`. It still runs inside the sandbox. See [../database/raw-writes.md](../database/raw-writes.md).
 - A permission applies to all tables in the database. There is no table allowlist and no column allowlist. See [../decisions/0002-write-is-a-whole-database-grant.md](../decisions/0002-write-is-a-whole-database-grant.md).
 - `danger-raw-write` is independent of `write`. It is its own capability.
 

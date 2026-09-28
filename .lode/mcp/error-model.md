@@ -39,16 +39,24 @@ with this code. The outcome is the same and the agent must stop. See
 | --- | --- | --- | --- |
 | `Unauthorized` | Missing or wrong bearer token. | Stop. | `401`, before a tool |
 | `PermissionDenied` | The deployment does not have the permission. | Stop. Do not retry. | SDK message |
-| `InvalidQuery` | Malformed SQL, an unknown name, more than one statement, or an absent statement. | Correct the statement. | `query` |
-| `QueryRejected` | The authorizer rejected an action. | Stop. The action is not available. | `query` |
-| `QueryTimedOut` | Execution passed the query timeout. | Make the query smaller. | `query`, `schema` |
-| `ResultTooLarge` | One single row is larger than the byte budget. | Select fewer columns. | `query` |
-| `InvalidWrite` | An invalid `requestId`, an unknown table or column, a value with no SQLite equivalent, a constraint violation, a missing or empty `where`, a missing `maxRows`, or a malformed condition. | Correct the request. | `insert`, `update`, `delete` |
+| `InvalidQuery` | Malformed SQL, an unknown name, more than one statement, or an absent statement. | Correct the statement. | `query`, `execute_write_sql` |
+| `QueryRejected` | The authorizer rejected an action. | Stop. The action is not available. | `query`, `execute_write_sql` |
+| `QueryTimedOut` | Execution passed the query timeout. | Make the query smaller. | `query`, `schema`, every write tool |
+| `ResultTooLarge` | One single row is larger than the byte budget. | Select fewer columns. | `query` only |
+| `InvalidWrite` | An invalid `requestId`, an absent `sql`, an unknown table or column, a value with no SQLite equivalent, a constraint violation, a missing or empty `where`, a missing `maxRows`, or a malformed condition. | Correct the request. | every write tool |
 | `WriteLimitExceeded` | The write would change more rows than the effective limit, counting a cascade and a trigger. Nothing changed. | Narrow the filter. | `update`, `delete` |
-| `WriteBudgetExceeded` | The per-minute write budget is empty. | Wait, then retry with the same `requestId`. | `insert`, `update`, `delete` |
+| `WriteBudgetExceeded` | The per-minute write budget is empty. | Wait, then retry with the same `requestId`. | every write tool |
 | `DatabaseBusy` | The busy timeout expired, or the write slot did not free. | Retry later with the same `requestId`. | `query`, and every write tool |
 | `DatabaseError` | Any other SQLite failure. | Report to the operator. | `query`, `schema`, and every write tool |
-| `BackupFailed` | The label is invalid, a backup is in progress, or the copy failed. | Report to the operator. | Phase 5 |
+| `BackupFailed` | The label is invalid, a backup is in progress, or the copy failed. | Report to the operator. | `backup` |
+
+**`ResultTooLarge` is a read-path code and `execute_write_sql` never returns it**, although a
+`RETURNING` clause meets the same condition. The write has already committed when the rows are read,
+thus a failure code would tell the agent that its request did not happen. See
+[../decisions/0008-a-committed-raw-write-never-fails-on-result-size.md](../decisions/0008-a-committed-raw-write-never-fails-on-result-size.md).
+
+**`WriteLimitExceeded` is impossible on the raw path.** There is no `maxRows`, no pre-count and no
+rollback: that is what the permission buys.
 
 ## Selection on the read path
 
@@ -111,6 +119,11 @@ flowchart TD
 database file, thus the agent gets fixed text that names the three constraint kinds. The detail goes to
 the log.
 
+**`execute_write_sql` adds the statement-shape branch of the read path to this one.** It is the only
+write tool that carries caller SQL, thus `InvalidQuery` and `QueryRejected` are reachable from a write
+request: the shared `RunWriteAsync` maps `StatementRejectedException` exactly as `query` does. See
+[../database/raw-writes.md](../database/raw-writes.md).
+
 **The write slot is a `DatabaseBusy` source and not only the SQLite busy timeout.** The wait for the
 one write slot is bounded by `BUSY_TIMEOUT_SECONDS`. From the view of the agent the cause is the same:
 another writer holds the lock, thus retry later. See
@@ -167,3 +180,4 @@ never goes out without a change.
 - [query-results.md](query-results.md)
 - [../plans/design/threat-model.md](../plans/design/threat-model.md)
 - [../database/structured-writes.md](../database/structured-writes.md)
+- [../database/raw-writes.md](../database/raw-writes.md)

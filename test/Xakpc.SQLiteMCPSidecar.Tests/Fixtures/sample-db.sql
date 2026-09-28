@@ -35,6 +35,14 @@ CREATE TABLE job_tags (
   tag     TEXT NOT NULL
 );
 
+-- events uses AUTOINCREMENT on purpose. It is what makes SQLite create the sqlite_sequence table,
+-- thus it is what lets a test prove that the DML authorizer policy of execute_write_sql rejects a
+-- write to an sqlite_ internal object. No other table needs AUTOINCREMENT.
+CREATE TABLE events (
+  id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind  TEXT NOT NULL
+);
+
 CREATE INDEX idx_jobs_status ON jobs(status);
 CREATE INDEX idx_logs_job ON logs(job_id);
 
@@ -62,3 +70,6 @@ INSERT INTO job_tags (job_id, tag) VALUES
   (41, 'import'),
   (41, 'retry'),
   (52, 'export');
+
+-- One row is enough: it is what makes SQLite write the sqlite_sequence row for events.
+INSERT INTO events (kind) VALUES ('created');

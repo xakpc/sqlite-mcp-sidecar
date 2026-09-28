@@ -7,7 +7,7 @@ Code: `src/Xakpc.SQLiteMCPSidecar/Database/StructuredWriteBuilder.cs`,
 `src/Xakpc.SQLiteMCPSidecar/Database/SqliteService.cs`.
 
 **Core contract.** The caller never supplies SQL. Caller SQL needs `danger-raw-write`, which is a
-different permission. See [../plans/design/raw-writes.md](../plans/design/raw-writes.md).
+different permission. See [raw-writes.md](raw-writes.md).
 
 ## Why the server builds the statement
 

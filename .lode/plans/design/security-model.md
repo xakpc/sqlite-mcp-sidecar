@@ -1,9 +1,11 @@
 # Security summary
 
-> **Status: partly implemented.** The authentication, permission, sandbox and result layers have
-> code. The write layers do not. Current state is in [../../summary.md](../../summary.md) and in
-> [../../database/sqlite-sandbox.md](../../database/sqlite-sandbox.md). Sequence is in
-> [../mvp-roadmap.md](../mvp-roadmap.md).
+> **Status: implemented.** Every layer of this model has code, `danger-raw-write` included. The file
+> stays here because the guarantee and non-guarantee lists are what the Phase 7 `README.md` and
+> `SECURITY.md` copy from. Current state is in [../../summary.md](../../summary.md),
+> [../../security/summary.md](../../security/summary.md),
+> [../../database/sqlite-sandbox.md](../../database/sqlite-sandbox.md) and
+> [../../database/raw-writes.md](../../database/raw-writes.md).
 
 The sidecar is a security boundary between an AI agent and a live application database. It
 defends against two different callers: an unauthorized client, and an authorized client that
@@ -38,7 +40,7 @@ flowchart TD
 
 The agent protections layer is the only layer that `danger-raw-write` makes weaker, and it
 keeps the idempotency key and the write budget. The sandbox layer stays intact. See
-[raw-writes.md](raw-writes.md).
+[../../database/raw-writes.md](../../database/raw-writes.md).
 
 ## Guarantees
 

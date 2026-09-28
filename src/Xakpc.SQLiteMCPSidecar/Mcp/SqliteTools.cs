@@ -176,12 +176,12 @@ public sealed partial class SqliteTools(
                 "The values object is absent or empty. Name at least one column and its value.");
         }
 
-        return await RunStructuredWriteAsync(
+        return await RunWriteAsync(
             "insert",
             started,
             key,
-            table!,
             StructuredWriteBuilder.CanonicalInsertPayload(table!, values),
+            (ms, rows, replayed, outcome) => LogWriteCompleted(logger, "insert", ms, table!, rows, replayed, outcome),
             token => database.InsertAsync(table!, values, token),
             result => $"rowsAffected: {result.RowsAffected}\nrowid: {result.RowId}",
             cancellationToken).ConfigureAwait(false);
@@ -240,12 +240,12 @@ public sealed partial class SqliteTools(
             return SidecarErrors.Failure(SidecarError.InvalidWrite, filterFailure!);
         }
 
-        return await RunStructuredWriteAsync(
+        return await RunWriteAsync(
             "update",
             started,
             key,
-            table!,
             StructuredWriteBuilder.CanonicalUpdatePayload(table!, values, filter, limit),
+            (ms, rows, replayed, outcome) => LogWriteCompleted(logger, "update", ms, table!, rows, replayed, outcome),
             token => database.UpdateAsync(table!, values, filter, limit, token),
             result => $"rowsAffected: {result.RowsAffected}\nrowsChanged: {result.RowsChanged}",
             cancellationToken).ConfigureAwait(false);
@@ -295,15 +295,114 @@ public sealed partial class SqliteTools(
             return SidecarErrors.Failure(SidecarError.InvalidWrite, filterFailure!);
         }
 
-        return await RunStructuredWriteAsync(
+        return await RunWriteAsync(
             "delete",
             started,
             key,
-            table!,
             StructuredWriteBuilder.CanonicalDeletePayload(table!, filter, limit),
+            (ms, rows, replayed, outcome) => LogWriteCompleted(logger, "delete", ms, table!, rows, replayed, outcome),
             token => database.DeleteAsync(table!, filter, limit, token),
             result => $"rowsAffected: {result.RowsAffected}\nrowsChanged: {result.RowsChanged}",
             cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The registered name of the raw write tool.</summary>
+    public const string RawWriteToolName = "execute_write_sql";
+
+    [McpServerTool(Name = RawWriteToolName)]
+    [Description("Run one caller-written INSERT, UPDATE or DELETE statement. This is the escape hatch "
+               + "for work that the structured insert, update and delete tools cannot express, and it "
+               + "gives up their protections: there is no row limit, and a WHERE clause is not "
+               + "required, so 'DELETE FROM jobs' is accepted and removes every row. A write cannot be "
+               + "undone: take a backup first when you are not sure. "
+               + "Read the schema first and write literal values into the statement; there is no "
+               + "parameter list. "
+               + "It must be exactly one statement: a second statement, any SELECT-only work that "
+               + "belongs in the query tool, DDL, ATTACH, VACUUM, any PRAGMA and BEGIN or COMMIT are "
+               + "all rejected, and so is a write to an sqlite_ internal table. "
+               + "Add a RETURNING clause to get the changed rows back as TOON, bounded by the same row "
+               + "limit and byte limit as a query.")]
+    [Authorize(Policy = "perm:danger-raw-write")]
+    public async Task<CallToolResult> ExecuteWriteSqlAsync(
+        [Description("A unique identifier for this write, at most 128 characters. Send the SAME value "
+                   + "when you retry a call that failed or timed out: the statement then runs one time "
+                   + "only. Use a NEW value for new work.")]
+        string? requestId = null,
+        [Description("One INSERT, UPDATE or DELETE statement, with no trailing second statement. "
+                   + "Write literal values into the statement. CTEs, subqueries, conflict clauses and "
+                   + "RETURNING are available.")]
+        string? sql = null,
+        CancellationToken cancellationToken = default)
+    {
+        var started = TimeProvider.System.GetTimestamp();
+
+        // Shape validation before any database work, and before the request slot.
+        if (ValidateRequestId(requestId, out var shapeFailure) is not { } key)
+        {
+            LogRawWriteCompleted(logger, RawWriteToolName, Elapsed(started), "-", 0, false, shapeFailure!);
+            return SidecarErrors.Failure(SidecarError.InvalidWrite, ExplanationForWrite(shapeFailure!));
+        }
+
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            LogRawWriteCompleted(logger, RawWriteToolName, Elapsed(started), "-", 0, false, nameof(SidecarError.InvalidWrite));
+            return SidecarErrors.Failure(
+                SidecarError.InvalidWrite,
+                "The sql value is required. Send exactly one INSERT, UPDATE or DELETE statement.");
+        }
+
+        // The statement itself is the canonical payload: there is no argument map whose key order
+        // would need normalizing. The hash of it is also the log identifier, thus the statement text
+        // never reaches a log line.
+        var canonical = $"{RawWriteToolName}\n{sql.Trim()}";
+        var sqlHash = WriteDeduplication.HashPayload(canonical);
+
+        return await RunWriteAsync(
+            RawWriteToolName,
+            started,
+            key,
+            canonical,
+            (ms, rows, replayed, outcome) =>
+                LogRawWriteCompleted(logger, RawWriteToolName, ms, sqlHash, rows, replayed, outcome),
+            token => database.ExecuteWriteSqlAsync(sql!, token),
+            FormatRawWrite,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Builds the answer of a raw write.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Invariant.</b> The result size never fails a committed raw write. The statement has already
+    /// run and committed when this method runs, thus <see cref="SidecarError.ResultTooLarge"/> is
+    /// unreachable here although the read path returns it for the same condition. A truncated
+    /// <c>RETURNING</c> result reports <c>truncated: true</c>, and a row that no budget can hold reports
+    /// that the rows were not returned. Both answers are honest about the write, which is the number the
+    /// agent must act on. See
+    /// <c>.lode/decisions/0008-a-committed-raw-write-never-fails-on-result-size.md</c>.
+    /// </para>
+    /// <para>
+    /// <c>rowsAffected</c> only, and never <c>rowsChanged</c>. A raw write has no <c>maxRows</c> to
+    /// bound a cascade against, thus the second number would be a fact with no action attached to it.
+    /// The write budget still counts it.
+    /// </para>
+    /// </remarks>
+    private static string FormatRawWrite(RawWriteResult result)
+    {
+        if (result.Rows is null)
+        {
+            return $"rowsAffected: {result.RowsAffected}";
+        }
+
+        if (result.Rows.RowTooLarge)
+        {
+            return $"rowsAffected: {result.RowsAffected}\n\n"
+                 + "rows: not returned, because one single row is larger than the result byte budget. "
+                 + "The write was applied. Name fewer columns in RETURNING to see the rows.";
+        }
+
+        return $"rowsAffected: {result.RowsAffected}\n\n{result.Rows.Text}";
     }
 
     /// <summary>
@@ -424,10 +523,17 @@ public sealed partial class SqliteTools(
     }
 
     /// <summary>
-    /// Runs the part that every structured write shares: the idempotency check, the budget gate, the
-    /// two slots, the execution and the mapping of a failure onto an error code.
+    /// Runs the part that every write shares: the idempotency check, the budget gate, the two slots,
+    /// the execution and the mapping of a failure onto an error code.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The three structured tools and <c>execute_write_sql</c> all run through this one method. The
+    /// order of the controls is a security contract, thus it exists one time and not two times. The
+    /// tools differ in three values only: the canonical payload, the execution and the log line, and
+    /// <paramref name="logCompleted"/> carries the last one because a structured write logs its table
+    /// while a raw write logs a hash of its statement.
+    /// </para>
     /// <para>
     /// <b>Invariant.</b> The order is deduplication, then the budget gate, then the request slot, then
     /// the write slot. A replayed response writes no row, thus it consumes no budget and needs no
@@ -440,15 +546,16 @@ public sealed partial class SqliteTools(
     /// impossible to follow for the whole window.
     /// </para>
     /// </remarks>
-    private async Task<CallToolResult> RunStructuredWriteAsync(
+    private async Task<CallToolResult> RunWriteAsync<TResult>(
         string tool,
         long started,
         string key,
-        string table,
         string canonicalPayload,
-        Func<CancellationToken, Task<StructuredWriteResult>> execute,
-        Func<StructuredWriteResult, string> format,
+        WriteCompletedLog logCompleted,
+        Func<CancellationToken, Task<TResult>> execute,
+        Func<TResult, string> format,
         CancellationToken cancellationToken)
+        where TResult : IWriteOutcome
     {
         // Deduplication runs before the budget check. A replayed response writes no row, thus it
         // consumes no budget.
@@ -457,11 +564,11 @@ public sealed partial class SqliteTools(
         {
             case DeduplicationOutcome.Replay:
                 // Byte-identical to the original answer: a retry must look like the first call.
-                LogWriteCompleted(logger, tool, Elapsed(started), table, 0, true, "ok");
+                logCompleted(Elapsed(started), 0, true, "ok");
                 return SidecarErrors.Success(stored!);
 
             case DeduplicationOutcome.PayloadConflict:
-                LogWriteCompleted(logger, tool, Elapsed(started), table, 0, false, nameof(SidecarError.InvalidWrite));
+                logCompleted(Elapsed(started), 0, false, nameof(SidecarError.InvalidWrite));
                 return SidecarErrors.Failure(
                     SidecarError.InvalidWrite,
                     "This requestId was used for different work. Use a new requestId for new work.");
@@ -469,7 +576,7 @@ public sealed partial class SqliteTools(
 
         if (!writeBudget.HasCapacity())
         {
-            LogWriteCompleted(logger, tool, Elapsed(started), table, 0, false, nameof(SidecarError.WriteBudgetExceeded));
+            logCompleted(Elapsed(started), 0, false, nameof(SidecarError.WriteBudgetExceeded));
             return SidecarErrors.Failure(
                 SidecarError.WriteBudgetExceeded,
                 "The write budget for this minute is used up. Wait, then retry with the same requestId.");
@@ -479,7 +586,7 @@ public sealed partial class SqliteTools(
         using var writeSlot = await database.TryAcquireWriteSlotAsync(cancellationToken).ConfigureAwait(false);
         if (writeSlot is null)
         {
-            LogWriteCompleted(logger, tool, Elapsed(started), table, 0, false, nameof(SidecarError.DatabaseBusy));
+            logCompleted(Elapsed(started), 0, false, nameof(SidecarError.DatabaseBusy));
             return SidecarErrors.Failure(SidecarError.DatabaseBusy, ExplanationFor(SidecarError.DatabaseBusy));
         }
 
@@ -494,15 +601,15 @@ public sealed partial class SqliteTools(
             var text = format(result);
             deduplication.Store(key, payloadHash, text);
 
-            LogWriteCompleted(logger, tool, Elapsed(started), table, result.RowsAffected, false, "ok");
+            logCompleted(Elapsed(started), result.RowsAffected, false, "ok");
             return SidecarErrors.Success(text);
         }
         catch (WriteLimitExceededException exception)
         {
             // One code for both checks: nothing changed either way, and the correct next action is the
             // same. The log carries which check fired, because that is operator information.
-            LogWriteLimitRejected(logger, tool, table, exception.Check, exception.Limit);
-            LogWriteCompleted(logger, tool, Elapsed(started), table, 0, false, nameof(SidecarError.WriteLimitExceeded));
+            LogWriteLimitRejected(logger, tool, exception.Check, exception.Limit);
+            logCompleted(Elapsed(started), 0, false, nameof(SidecarError.WriteLimitExceeded));
             return SidecarErrors.Failure(
                 SidecarError.WriteLimitExceeded,
                 $"The write would change more rows than the limit of {exception.Limit}, counting every "
@@ -511,8 +618,27 @@ public sealed partial class SqliteTools(
         catch (InvalidWriteException exception)
         {
             // The message names only what the caller already sent. It carries no value and no path.
-            LogWriteCompleted(logger, tool, Elapsed(started), table, 0, false, nameof(SidecarError.InvalidWrite));
+            logCompleted(Elapsed(started), 0, false, nameof(SidecarError.InvalidWrite));
             return SidecarErrors.Failure(SidecarError.InvalidWrite, exception.Message);
+        }
+        catch (StatementRejectedException exception)
+        {
+            // Only execute_write_sql reaches this: a structured write sends no caller SQL. The mapping
+            // is the one that the query tool uses, thus one statement kind gives one code everywhere.
+            var (code, explanation) = exception.Check switch
+            {
+                StatementCheck.MultipleStatements => (SidecarError.InvalidQuery,
+                    "The request holds more than one statement. Send exactly one."),
+                StatementCheck.Empty => (SidecarError.InvalidQuery,
+                    "The request holds no statement."),
+                StatementCheck.Rejected => (SidecarError.QueryRejected,
+                    "The requested action is not permitted. Only INSERT, UPDATE and DELETE are available."),
+                _ => (SidecarError.InvalidQuery,
+                    "The statement did not compile. Check the syntax and the table and column names."),
+            };
+
+            logCompleted(Elapsed(started), 0, false, code.ToString());
+            return SidecarErrors.Failure(code, explanation);
         }
         catch (SqliteException exception)
         {
@@ -532,7 +658,7 @@ public sealed partial class SqliteTools(
         catch (OperationCanceledException)
         {
             // Nothing was committed, thus nothing is cached and a retry is correct.
-            LogWriteCompleted(logger, tool, Elapsed(started), table, 0, false, nameof(SidecarError.QueryTimedOut));
+            logCompleted(Elapsed(started), 0, false, nameof(SidecarError.QueryTimedOut));
             return SidecarErrors.Failure(
                 SidecarError.QueryTimedOut,
                 "The write passed the time limit and was stopped. Nothing changed. Retry with the same requestId.");
@@ -597,6 +723,29 @@ public sealed partial class SqliteTools(
     /// </remarks>
     private static string? ValidateWriteRequest(string? requestId, string? table, out string? outcome)
     {
+        if (ValidateRequestId(requestId, out outcome) is not { } key)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(table))
+        {
+            outcome = MissingTable;
+            return null;
+        }
+
+        return key;
+    }
+
+    /// <summary>
+    /// Validates the one argument that every write tool shares, and returns the cache key.
+    /// </summary>
+    /// <remarks>
+    /// <c>execute_write_sql</c> names no table, thus it calls this method and not
+    /// <see cref="ValidateWriteRequest"/>. The <c>= null</c> lesson above applies to it unchanged.
+    /// </remarks>
+    private static string? ValidateRequestId(string? requestId, out string? outcome)
+    {
         outcome = null;
 
         if (string.IsNullOrWhiteSpace(requestId))
@@ -608,12 +757,6 @@ public sealed partial class SqliteTools(
         if (requestId.Length > WriteDeduplication.MaxKeyLength)
         {
             outcome = RequestIdTooLong;
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(table))
-        {
-            outcome = MissingTable;
             return null;
         }
 
@@ -695,7 +838,32 @@ public sealed partial class SqliteTools(
     /// this line is the only evidence an operator has.
     /// </remarks>
     [LoggerMessage(EventId = 2005, Level = LogLevel.Information,
-        Message = "Write rejected by the row limit. tool={Tool} table={Table} check={Check} limit={Limit}")]
+        Message = "Write rejected by the row limit. tool={Tool} check={Check} limit={Limit}")]
     private static partial void LogWriteLimitRejected(
-        ILogger logger, string tool, string table, string check, int limit);
+        ILogger logger, string tool, string check, int limit);
+
+    /// <summary>
+    /// The raw write log line. It carries a hash of the statement and never the statement itself.
+    /// </summary>
+    /// <remarks>
+    /// A raw statement holds caller-chosen literal values, thus the text is row data and it must not
+    /// reach a log pipeline. The hash still correlates the calls of one retry, which is what an operator
+    /// needs. The line has no table field: the statement names the tables and the server does not parse
+    /// it.
+    /// </remarks>
+    [LoggerMessage(EventId = 2006, Level = LogLevel.Information,
+        Message = "Raw write completed. tool={Tool} durationMs={DurationMs} sqlHash={SqlHash} "
+                + "rowsAffected={RowsAffected} replayed={Replayed} outcome={Outcome}")]
+    private static partial void LogRawWriteCompleted(
+        ILogger logger, string tool, double durationMs, string sqlHash, int rowsAffected, bool replayed, string outcome);
+
+    /// <summary>
+    /// The completion log line of one write, supplied by the tool that runs.
+    /// </summary>
+    /// <remarks>
+    /// A structured write logs its table and a raw write logs a hash of its statement. One shared
+    /// runner with this delegate keeps the order of the controls in one place and keeps each log line
+    /// honest: a field named <c>table</c> that carried a hash would be worse than two messages.
+    /// </remarks>
+    private delegate void WriteCompletedLog(double durationMs, int rowsAffected, bool replayed, string outcome);
 }

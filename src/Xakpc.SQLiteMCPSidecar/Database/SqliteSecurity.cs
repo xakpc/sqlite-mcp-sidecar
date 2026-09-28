@@ -18,6 +18,12 @@ internal enum AuthorizerPolicy
     /// and <c>delete</c>.
     /// </summary>
     Write,
+
+    /// <summary>
+    /// Caller-supplied DML. The policy of <c>execute_write_sql</c>, and the only policy of the three
+    /// that ever sees caller SQL on a write connection.
+    /// </summary>
+    Dml,
 }
 
 /// <summary>The outcome of the one-statement check that runs before execution.</summary>
@@ -256,6 +262,32 @@ internal static class SqliteSecurity
         return raw.sqlite3_total_changes(handle);
     }
 
+    /// <summary>
+    /// Reads the rows that the most recent statement on this connection changed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the <c>rowsAffected</c> number: the rows of the target table, with no cascaded row and
+    /// no row that a trigger wrote. Use <see cref="TotalChanges"/> for the blast radius, which is what
+    /// bounds a structured write and what the write budget counts.
+    /// </para>
+    /// <para>
+    /// A raw write runs through a reader, because a <c>RETURNING</c> clause produces rows, thus the
+    /// <c>ExecuteNonQuery</c> return value is not available. The native counter is. Like
+    /// <see cref="TotalChanges"/> it reads connection state and runs no statement. Read it after the
+    /// statement ran to completion: SQLite sets the counter when the statement finishes.
+    /// </para>
+    /// </remarks>
+    public static int Changes(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        var handle = connection.Handle
+            ?? throw new InvalidOperationException("The connection is not open, thus it has no handle.");
+
+        return raw.sqlite3_changes(handle);
+    }
+
     private static void Check(int result, sqlite3 handle, string what)
     {
         if (result != raw.SQLITE_OK)
@@ -286,6 +318,7 @@ internal static class SqliteSecurity
             {
                 AuthorizerPolicy.Read => ReadPolicy,
                 AuthorizerPolicy.Write => WritePolicy,
+                AuthorizerPolicy.Dml => DmlPolicy,
                 _ => throw new ArgumentOutOfRangeException(nameof(policy)),
             };
 
@@ -357,8 +390,7 @@ internal static class SqliteSecurity
         /// <c>SQLITE_SELECT</c> and <c>SQLITE_READ</c> are necessary and they are not a weakness. The
         /// bounded pre-count is a <c>SELECT</c>, a <c>CHECK</c> constraint reads the new row, and a
         /// foreign key reads the referenced table. The statement is server-authored in each case, thus
-        /// this policy never sees caller SQL. <c>execute_write_sql</c> gets its own policy value in
-        /// Phase 6.
+        /// this policy never sees caller SQL. <see cref="DmlPolicy"/> is the one that does.
         /// </para>
         /// </remarks>
         private static int WritePolicy(object? userData, int actionCode, utf8z arg1, utf8z arg2, utf8z dbName, utf8z trigger)
@@ -389,6 +421,67 @@ internal static class SqliteSecurity
                 return raw.SQLITE_DENY;
             }
         }
+
+        /// <summary>
+        /// The DML policy. It is the write policy plus one rule: a write to an <c>sqlite_%</c> object
+        /// is rejected.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This is the one policy that sees caller SQL on a write connection. It accepts the three DML
+        /// actions and it rejects each other one, thus <c>danger-raw-write</c> is raw
+        /// <c>INSERT</c> / <c>UPDATE</c> / <c>DELETE</c> inside the sandbox and not unrestricted
+        /// SQLite. DDL, <c>ATTACH</c>, <c>PRAGMA</c>, <c>VACUUM</c> and transaction control all stay
+        /// denied, exactly as they are for the <c>query</c> tool.
+        /// </para>
+        /// <para>
+        /// <b>The one difference from <see cref="WritePolicy"/>.</b> For a DML action the first
+        /// callback argument is the table name, and a name that starts with <c>sqlite_</c> is SQLite
+        /// internal state. <c>UPDATE sqlite_sequence</c> would change the autoincrement behaviour of
+        /// the owning application, which is not data manipulation of the caller's own rows.
+        /// <c>StructuredWriteBuilder</c> already refuses such a target by name, thus this rule gives the
+        /// raw path the same boundary one layer lower.
+        /// </para>
+        /// <para>
+        /// <c>SQLITE_SELECT</c> and <c>SQLITE_READ</c> stay accepted. An <c>INSERT ... SELECT</c>, a
+        /// <c>WHERE</c> clause, a <c>CHECK</c> constraint and a foreign key all need them. A caller can
+        /// therefore also send a plain <c>SELECT</c> here, which gains it nothing: the read floor
+        /// guarantees that a <c>danger-raw-write</c> deployment also has <c>read</c>.
+        /// </para>
+        /// </remarks>
+        private static int DmlPolicy(object? userData, int actionCode, utf8z arg1, utf8z arg2, utf8z dbName, utf8z trigger)
+        {
+            try
+            {
+                if (actionCode == raw.SQLITE_INSERT || actionCode == raw.SQLITE_UPDATE || actionCode == raw.SQLITE_DELETE)
+                {
+                    // For these three actions the first argument is the table name.
+                    var table = arg1.utf8_to_string();
+                    return table is not null && IsInternalObject(table) ? raw.SQLITE_DENY : raw.SQLITE_OK;
+                }
+
+                if (actionCode == raw.SQLITE_SELECT || actionCode == raw.SQLITE_READ || actionCode == raw.SQLITE_RECURSIVE)
+                {
+                    return raw.SQLITE_OK;
+                }
+
+                if (actionCode == raw.SQLITE_FUNCTION)
+                {
+                    var name = arg2.utf8_to_string();
+                    return name is not null && !IsDeniedFunction(name) ? raw.SQLITE_OK : raw.SQLITE_DENY;
+                }
+
+                return raw.SQLITE_DENY;
+            }
+            catch
+            {
+                // An exception must never cross a native callback boundary. Reject instead.
+                return raw.SQLITE_DENY;
+            }
+        }
+
+        private static bool IsInternalObject(string name) =>
+            name.StartsWith("sqlite_", StringComparison.OrdinalIgnoreCase);
 
         private static bool IsDeniedFunction(string name)
         {

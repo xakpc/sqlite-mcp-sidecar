@@ -6,7 +6,8 @@ decisions are in [open-questions.md](open-questions.md).
 
 ## Current state
 
-Phase 0 to Phase 5 are done. Phase 2 and Phase 3 shipped together. See
+Phase 0 to Phase 6 are done. Phase 2 and Phase 3 shipped together. The product capabilities are
+complete, thus what is left is the container, the documentation and the NativeAOT attempt. See
 [../summary.md](../summary.md) for the status table.
 
 ## Sequence
@@ -18,7 +19,7 @@ flowchart TD
     p23 --> p4a[Phase 4a: the write path and insert — done]
     p4a --> p4b[Phase 4b: the filter, update and delete — done]
     p4b --> p5[Phase 5: backup and diagnostics — done]
-    p5 --> p6[Phase 6: danger-raw-write]
+    p5 --> p6[Phase 6: danger-raw-write — done]
     p6 --> p7[Phase 7: container and docs]
     p7 --> p8[Phase 8: NativeAOT attempt]
 ```
@@ -84,16 +85,18 @@ codebase holds no uncalled code:
 | The backup semaphore | 5, done |
 | The write and DML authorizer policies | 4a and 6 |
 
-Their design stays in [design/connection-policy.md](design/connection-policy.md).
+Every one of them is current state now: the connections and the semaphores in
+[../database/connections.md](../database/connections.md), and the three authorizer policies in
+[../database/sqlite-sandbox.md](../database/sqlite-sandbox.md).
 
 ### Phase 4a — the write path and `insert`. Done
 
-- The read-write connection, with `ForeignKeys = true`. See [design/connection-policy.md](design/connection-policy.md).
+- The read-write connection, with `ForeignKeys = true`. See [../database/connections.md](../database/connections.md).
 - The write semaphore, with a wait that the busy timeout bounds.
 - `AuthorizerPolicy.Write`, a second value in `Database/SqliteSecurity.cs`.
 - `Database/StructuredWriteBuilder.cs`: identifier validation against the live schema, and parameterized SQL.
 - `Security/WriteBudget.cs`, an in-memory rolling window.
-- `Security/WriteDeduplication.cs`. See [design/write-idempotency.md](design/write-idempotency.md).
+- `Security/WriteDeduplication.cs`. See [../security/write-controls.md](../security/write-controls.md).
 - `insert`, with a mandatory `requestId`. Three arguments, no filter and no `maxRows`.
 
 An `insert` adds one row, the same `requestId` applies it one time only, and many small writes return
@@ -110,7 +113,7 @@ Current state: [../database/structured-writes.md](../database/structured-writes.
 
 `StructuredWriteBuilder` holds the flat filter model, the three builders and the bounded pre-count.
 `SqliteService.MutateAsync` holds `BEGIN IMMEDIATE`, the two checks and the row-limit rollback.
-`SqliteTools.RunStructuredWriteAsync` holds the order of the controls for all three write tools.
+`SqliteTools.RunWriteAsync` holds the order of the controls for every write tool.
 
 A broad filter is rejected before the write starts, an over-limit write rolls back, both return
 `WriteLimitExceeded`, and the rows are unchanged after each rejection.
@@ -157,17 +160,35 @@ because it is the first test that asserts the reported mode. The fixture now app
 the script and throws when SQLite reports a different one. A test that asserts nothing observable can
 pass for years.
 
-### Phase 6 — danger-raw-write
+### Phase 6 — danger-raw-write. Done
 
-- `execute_write_sql` behind the permission. See [design/raw-writes.md](design/raw-writes.md).
-- The DML authorizer policy in `Database/SqliteSecurity.cs`, as a second `AuthorizerPolicy` value.
-- Run the `SandboxBoundaryTests` list again through `execute_write_sql`. Each hard boundary must still fail.
-- Mandatory `requestId`, and write budget accounting after execution.
-- `RETURNING` results through the same TOON path.
-- `sqlHash` logging.
+Current state: [../database/raw-writes.md](../database/raw-writes.md),
+[../database/sqlite-sandbox.md](../database/sqlite-sandbox.md),
+[../mcp/tool-catalog.md](../mcp/tool-catalog.md),
+[../decisions/0008-a-committed-raw-write-never-fails-on-result-size.md](../decisions/0008-a-committed-raw-write-never-fails-on-result-size.md).
 
-Done when: raw DML succeeds with the permission, it is absent without it, and each hard
-boundary still fails.
+`AuthorizerPolicy.Dml` is the third policy value, `SqliteService.ExecuteWriteSqlAsync` runs the
+statement, and the tool shares `RunWriteAsync` with the three structured tools, thus one method still
+owns the order of the controls. `SandboxBoundaryTests` runs the hard-boundary list a second time
+through `execute_write_sql`.
+
+Raw DML succeeds with the permission, the tool is absent without it, and each hard boundary still
+fails.
+
+**Two decisions changed the drafted plan.**
+
+- **The tool takes no `parameters` map.** The design drafted one. A caller that holds this permission already writes the whole statement, thus a parameter map adds an argument, a validation path and a second value model with no security gain. `query` already asks for literal values in the text, and the two caller-SQL tools now have the same shape.
+- **The DML policy rejects a write to an `sqlite_%` object.** Without that rule the policy would be a copy of `AuthorizerPolicy.Write`, and `UPDATE sqlite_sequence` would change the autoincrement behaviour of the owning application. `StructuredWriteBuilder` already refuses such a target by name, thus the raw path now has the same boundary one layer lower. `events` in `sample-db.sql` carries `AUTOINCREMENT` so that `sqlite_sequence` exists for the test to aim at.
+
+**Lesson, and it is the kind that no error would report.** A `RETURNING` clause produces its rows while
+the write progresses, thus the bounded result read must not stop the reader: the remaining rows would
+never be written and `rowsAffected` would still look plausible. The execution drains the reader before
+the commit, and the result size therefore never fails a committed raw write. See
+[../decisions/0008-a-committed-raw-write-never-fails-on-result-size.md](../decisions/0008-a-committed-raw-write-never-fails-on-result-size.md).
+
+**`VACUUM` is not stopped by the authorizer.** SQLite runs no authorizer callback for it. On this path
+`BEGIN IMMEDIATE` is what rejects it, with `cannot VACUUM from within a transaction`, thus the code is
+`DatabaseError` and the test asserts the fact that matters: no file appears.
 
 ### Phase 7 — container and documentation
 
@@ -193,9 +214,9 @@ The mandatory lists live in [required-tests.md](required-tests.md): the hard-bou
 startup cases, the structured write cases, the idempotency cases, the raw write cases and the
 functional cases. Security tests are mandatory, not optional.
 
-The startup list and the hard-boundary list are complete, in `StartupTests` and in
-`SandboxBoundaryTests`. Each remaining list belongs to the phase
-that builds its feature.
+Every mandatory list is complete. The hard-boundary list runs two times, through `query` and through
+`execute_write_sql`. What remains in that file belongs to Phase 7: the functional suite must also run
+against the published Linux artifact.
 
 ## Definition of done
 

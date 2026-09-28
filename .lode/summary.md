@@ -2,8 +2,9 @@
 
 `sqlite-sidecar-mcp` is an agent-safe MCP sidecar for one live SQLite database. It runs next
 to an application that already owns the database file. It gives remote MCP clients controlled
-access to schema, read queries, bounded structured writes, backups and basic diagnostics. The
-owning application does not change. The sidecar is only one more SQLite client.
+access to schema, read queries, bounded structured writes, backups and basic diagnostics, and, with
+one explicit permission, raw DML. The owning application does not change. The sidecar is only one more
+SQLite client.
 
 The product is a security boundary between an AI agent and a production database. It must
 limit the damage that an authorized but mistaken agent can cause. The implementation is C# on
@@ -24,8 +25,16 @@ model, the bounded pre-count, the row-limit rollback, the write budget and the i
 
 The operational half is done too. `backup` copies the live database with an incremental
 `sqlite3_backup_step` loop, so the owning application keeps writing, and it abandons itself after 50
-restarts. `diagnostics` reports a fixed value set. What is left is the optional `danger-raw-write`
-escape hatch (Phase 6) and the container and documentation (Phase 7).
+restarts. `diagnostics` reports a fixed value set.
+
+The escape hatch exists as well. `execute_write_sql` runs one caller-written `INSERT`, `UPDATE` or
+`DELETE` behind `danger-raw-write`, on the same write connection and through the same idempotency
+cache and write budget, under a third authorizer policy that also refuses a write to an `sqlite_%`
+object. It gives up `maxRows`, the pre-count and the rollback, and it gives up nothing of the SQLite
+sandbox.
+
+**Every product capability is now implemented.** What is left is the container and the documentation
+(Phase 7) and the NativeAOT attempt (Phase 8).
 
 | Area | State |
 | --- | --- |
@@ -37,7 +46,7 @@ escape hatch (Phase 6) and the container and documentation (Phase 7).
 | Read-only connection | Implemented — [database/connections.md](database/connections.md) |
 | SQLite sandbox | Implemented — [database/sqlite-sandbox.md](database/sqlite-sandbox.md) |
 | TOON results and limits | Implemented — [mcp/query-results.md](mcp/query-results.md) |
-| Error model, read path | Implemented — [mcp/error-model.md](mcp/error-model.md) |
+| Error model, every path | Implemented — [mcp/error-model.md](mcp/error-model.md) |
 | Test harness | Implemented — [testing/e2e-harness.md](testing/e2e-harness.md) |
 | Write connection, write semaphore, write authorizer policy | Implemented — [database/connections.md](database/connections.md), [database/sqlite-sandbox.md](database/sqlite-sandbox.md) |
 | `insert` and identifier validation | Implemented — [database/structured-writes.md](database/structured-writes.md) |
@@ -45,7 +54,7 @@ escape hatch (Phase 6) and the container and documentation (Phase 7).
 | `update`, `delete`, the filter model, the pre-count | Implemented — [database/structured-writes.md](database/structured-writes.md) |
 | Backup, the step loop and the restart cap | Implemented — [database/backups.md](database/backups.md) |
 | Diagnostics | Implemented — [database/diagnostics.md](database/diagnostics.md) |
-| `danger-raw-write` | Not started — Phase 6 |
+| `execute_write_sql` and the DML authorizer policy | Implemented — [database/raw-writes.md](database/raw-writes.md) |
 | Container and documentation | Not started — Phase 7 |
 | NativeAOT | Analyzers on. The publish attempt is Phase 8 |
 
@@ -83,7 +92,8 @@ test/Xakpc.SQLiteMCPSidecar.Tests/
     Fixtures/                      sample-db.sql, SampleDatabase.cs, DevDatabaseTests.cs
     StartupTests.cs, AuthTests.cs, PermissionGatingTests.cs, SchemaToolTests.cs
     SandboxBoundaryTests.cs, QueryToolTests.cs, RateLimitTests.cs
-    InsertToolTests.cs, WriteIdempotencyTests.cs, WriteBudgetTests.cs
+    InsertToolTests.cs, UpdateToolTests.cs, DeleteToolTests.cs
+    WriteIdempotencyTests.cs, WriteBudgetTests.cs, RawWriteToolTests.cs
     BackupToolTests.cs, DiagnosticsToolTests.cs
 sqlite-sidecar-mcp — Design Document.md
 ```
@@ -113,7 +123,7 @@ schema   query   insert   update   delete   backup   diagnostics
 execute_write_sql
 ```
 
-Every tool of the first line exists, and `backup` is the one task-mode tool: it answers with a task
+Every one of the eight exists, and `backup` is the one task-mode tool: it answers with a task
 id and the client polls for the outcome. The permission set decides which tools exist. See
 [mcp/tool-catalog.md](mcp/tool-catalog.md).
 

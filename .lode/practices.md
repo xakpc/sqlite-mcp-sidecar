@@ -54,7 +54,7 @@ AOT-friendly and it needs no separate folder.
 - Parameterize every value. Validate every identifier against the live schema.
 - Accept exactly one SQL statement per raw request.
 - Start a write transaction with `BEGIN IMMEDIATE`, never with `BEGIN`. SQLite does not call the busy handler for a lock upgrade.
-- Give each write tool a mandatory `requestId`. Cache a committed response only. See [plans/design/write-idempotency.md](plans/design/write-idempotency.md).
+- Give each write tool a mandatory `requestId`. Cache a committed response only. See [security/write-controls.md](security/write-controls.md).
 - Fail startup when required configuration is absent. Do not start in a degraded state.
 - Return a small error code. Do not return a stack trace, a secret or a filesystem path.
 - Give the MCP endpoint its whole public path, `/db/mcp`. Do not depend on a proxy to rewrite a

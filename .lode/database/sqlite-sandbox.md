@@ -1,7 +1,7 @@
 # SQLite sandbox
 
 The innermost security layer. It is always on, it is not a feature flag, and no permission disables
-any part of it. `danger-raw-write` will not weaken it.
+any part of it. `danger-raw-write` does not weaken it.
 
 Code: `src/Xakpc.SQLiteMCPSidecar/Database/SqliteSecurity.cs`.
 
@@ -28,10 +28,15 @@ same surface exists on `SQLitePCLRaw.core` 2.1.12, thus the code does not depend
 | Statement count | `raw.sqlite3_prepare_v2(h, sql, out stmt, out tail)` |
 | Cancellation | `raw.sqlite3_interrupt(h)`, `raw.sqlite3_progress_handler(...)` |
 | Last inserted rowid | `raw.sqlite3_last_insert_rowid(h)` |
+| Rows of the last statement | `raw.sqlite3_changes(h)` |
+| Rows of every statement | `raw.sqlite3_total_changes(h)` |
 
 `Microsoft.Data.Sqlite` has no `LastInsertRowId` property: that member belongs to
-`System.Data.SQLite`, which is a different library. The native call reads connection state and runs no
-statement, thus it also works while an authorizer is installed.
+`System.Data.SQLite`, which is a different library. Each of the last three calls reads connection state
+and runs no statement, thus each one also works while an authorizer is installed. `sqlite3_changes` is
+`rowsAffected` and `sqlite3_total_changes` is the blast radius; a raw write needs the first one, because
+it executes through a reader and `ExecuteNonQuery` gives it no count. See
+[../decisions/0004-maxrows-bounds-total-changes.md](../decisions/0004-maxrows-bounds-total-changes.md).
 
 ## Three entry points
 
@@ -42,21 +47,28 @@ using var authorizer = SqliteSecurity.InstallAuthorizer(connection, AuthorizerPo
 var check = SqliteSecurity.ValidateSingleStatement(connection, sql);
 ```
 
-`AuthorizerPolicy` has two values, `Read` and `Write`. The DML policy of `execute_write_sql` arrives
-with that tool in Phase 6. The policy comes from the tool that runs, never from the deployment
-permission set.
+`AuthorizerPolicy` has three values. The policy comes from the tool that runs, never from the
+deployment permission set.
 
 | Policy | Accepts | Used by |
 | --- | --- | --- |
 | `Read` | `SELECT`, `READ`, `RECURSIVE`, `FUNCTION` by name | `query` |
-| `Write` | the same, plus `INSERT`, `UPDATE`, `DELETE` | `insert` |
+| `Write` | the same, plus `INSERT`, `UPDATE`, `DELETE` | `insert`, `update`, `delete` |
+| `Dml` | the same as `Write`, minus DML against an `sqlite_%` object | `execute_write_sql` |
 
-`SQLITE_SELECT` and `SQLITE_READ` in the write policy are necessary and they are not a weakness. The
-bounded pre-count is a `SELECT`, a `CHECK` constraint reads the new row, and a foreign key reads the
-referenced table. The statement is server-authored in each case, thus the write policy never sees
-caller SQL.
+`SQLITE_SELECT` and `SQLITE_READ` in the two write policies are necessary and they are not a weakness:
+the bounded pre-count is a `SELECT`, a `CHECK` constraint reads the new row, a foreign key reads the
+referenced table, and an `INSERT ... SELECT` needs them too.
 
-`SQLITE_TRANSACTION` and `SQLITE_PRAGMA` stay denied in **both** policies. See the order below.
+**`Dml` is the one policy that sees caller SQL on a write connection**, and that is the whole reason it
+is a separate value. `Write` runs server-authored statements only, thus it needs no rule about the
+target name: `StructuredWriteBuilder` already refuses an `sqlite_%` table by name. `Dml` reads the
+table name out of `arg1`, which carries it for those three actions, and denies an internal object.
+`UPDATE sqlite_sequence SET seq = 0` would change the autoincrement behaviour of the owning
+application, which is not manipulation of the caller's own data. See
+[raw-writes.md](raw-writes.md).
+
+`SQLITE_TRANSACTION` and `SQLITE_PRAGMA` stay denied in **all three** policies. See the order below.
 
 ## Order
 
@@ -78,11 +90,15 @@ on the connection handle and not on the process.
 `PRAGMA`, and the sidecar runs its own `PRAGMA query_only=ON` on a read and its own
 `PRAGMA table_info` on a write.
 
-**Invariant.** On the write path the authorizer also goes on **after** `BEGIN IMMEDIATE` and comes off
+**Invariant.** On a write path the authorizer also goes on **after** `BEGIN IMMEDIATE` and comes off
 **before** `COMMIT` or `ROLLBACK`, because each policy denies transaction control. The server would
-otherwise reject its own transaction. Declaration order does not give this: the write path calls
+otherwise reject its own transaction. Declaration order does not give this: a write path calls
 `Dispose()` explicitly before the commit and in the `catch`. See
 [structured-writes.md](structured-writes.md).
+
+**`execute_write_sql` installs the authorizer two times.** The first scope is before the transaction
+and covers `ValidateSingleStatement`, thus a refused statement never takes the write lock; the second
+covers the execution. See [raw-writes.md](raw-writes.md).
 
 **Invariant.** Remove the authorizer and the progress handler before the handle closes. On the read
 path declaration order gives that for free: C# disposes in the reverse order.
@@ -112,10 +128,9 @@ Three reasons for an allowlist and not a denylist:
 - SQLite has more than thirty action codes, with many `CREATE_*`, `DROP_*`, temporary and virtual
   table variants.
 - A denylist admits with no message any action code that a later SQLite version adds.
-- The action code of `VACUUM INTO` is not dependable. An allowlist rejects it with no need to name
-  it.
+- The action code of `VACUUM INTO` is not dependable. An allowlist rejects it with no need to name it.
 
-`SQLITE_PRAGMA` is denied on the read path. No legitimate caller statement needs a pragma.
+`SQLITE_PRAGMA` is denied in every policy. No legitimate caller statement needs a pragma.
 
 `SQLITE_FUNCTION` is allowed by default and denied by name, because a policy that rejected every
 function would reject ordinary SQL. The denied names are `load_extension` and `fts3_tokenizer`.
@@ -184,28 +199,34 @@ typing and value extraction.
 
 ## Hard boundaries
 
-The sidecar always rejects these actions, and `danger-raw-write` will not change it:
+The sidecar always rejects these actions, and `danger-raw-write` does not change it:
 
 ```text
 ATTACH, DETACH
 CREATE, DROP, ALTER
-VACUUM INTO
+VACUUM, VACUUM INTO
 load_extension
 every PRAGMA
 transaction control
 more than one statement
+DML against an sqlite_% object    (the Dml policy; a structured write refuses it by name)
 ```
 
 `VACUUM INTO` writes a database copy to a caller-chosen path. It is a file exfiltration primitive,
 thus it belongs with the DDL rejections and not with the backup feature.
+
+**`VACUUM` fails through a different mechanism on each path**, and neither one is the authorizer:
+SQLite runs no callback for it. The read connection is read-only with `query_only` on, and a raw write
+runs inside `BEGIN IMMEDIATE`, thus SQLite reports `cannot VACUUM from within a transaction` and the
+code is `DatabaseError`. Both tests assert the fact that matters: no file appears.
 
 ```text
 danger-raw-write  !=  unrestricted SQLite
 danger-raw-write  ==  raw INSERT / UPDATE / DELETE inside this sandbox
 ```
 
-`SandboxBoundaryTests` proves each item remotely through the `query` tool. Phase 6 runs the same
-list again through `execute_write_sql`.
+`SandboxBoundaryTests` proves each item remotely, and it runs the list two times: through `query` and
+through `execute_write_sql`.
 
 ## Cancellation
 
@@ -227,4 +248,4 @@ maps to `QueryTimedOut`.
 - [../mcp/error-model.md](../mcp/error-model.md) — the codes that a rejection produces
 - [../mcp/query-results.md](../mcp/query-results.md) — the result pipeline
 - [../plans/design/threat-model.md](../plans/design/threat-model.md)
-- [../plans/design/raw-writes.md](../plans/design/raw-writes.md)
+- [raw-writes.md](raw-writes.md)

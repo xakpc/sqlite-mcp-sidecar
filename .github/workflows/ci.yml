@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 jobs:
@@ -21,7 +21,89 @@ jobs:
       - name: Build
         run: dotnet build Xakpc.SQLiteMCPSidecar.slnx --configuration Release --no-restore
 
-      # The sandbox depends on the native SQLite build, thus this Linux run is the one that proves
-      # the shipped behaviour. The container-targeted run joins it when the image lands.
+      # Each test gets its own temporary database here, thus this run proves the logic but never the
+      # behaviour of two clients on one file. The container job below covers that.
       - name: Test
         run: dotnet test --solution Xakpc.SQLiteMCPSidecar.slnx --configuration Release --no-build
+
+  # The suite a second time, against the image that ships, over one mounted database.
+  #
+  # This job is not a duplicate of the one above. The SQLite sandbox depends on the native SQLite
+  # build, thus the hard boundaries are only proven on the artifact that an operator pulls. The
+  # shared database also makes this the one run where the sidecar and another SQLite client hold
+  # the same file at the same time.
+  container-e2e:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # An external sidecar has one fixed permission set, and the harness skips a test that needs
+        # a different one. These two carry the hard-boundary list: the first through query, the
+        # second through execute_write_sql. The remaining sets exercise .NET logic that the
+        # in-process job above already covers on Linux.
+        perms:
+          - schema,read
+          - schema,read,danger-raw-write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build the image
+        run: docker build -f src/Xakpc.SQLiteMCPSidecar/Dockerfile -t sqlite-sidecar-mcp:ci .
+
+      # The sidecar never creates the database. The seed script runs one test that writes
+      # Fixtures/sample-db.sql to the path, thus the manual path and the suite share one fixture.
+      - name: Seed the database
+        run: pwsh -NoProfile -File ./scripts/seed-dev-db.ps1 -Force
+
+      # The image runs as a non-root user that the host does not know. The mount must be writable
+      # for it, and also for a read-only permission set: SQLite opens the -shm file read-write for a
+      # read-only connection to a WAL database.
+      - name: Open the mount to the container user
+        run: chmod -R 0777 build/dev
+
+      - name: Start the sidecar
+        env:
+          SIDECAR_PERMISSIONS: ${{ matrix.perms }}
+        run: |
+          docker run -d --name sidecar \
+            -p 8080:8080 \
+            -v "$PWD/build/dev:/data" \
+            -v "$PWD/build/dev/backups:/backups" \
+            -e SQLITE_SIDECAR_DB=/data/app.db \
+            -e SQLITE_SIDECAR_TOKEN=dev-token \
+            -e SQLITE_SIDECAR_PERMISSIONS="$SIDECAR_PERMISSIONS" \
+            -e SQLITE_SIDECAR_BACKUP_DIR=/backups \
+            --read-only --tmpfs /tmp \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            sqlite-sidecar-mcp:ci
+
+      - name: Wait for the health endpoint
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health > /dev/null; then
+              echo "ready after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "The sidecar did not answer on /health."
+          docker logs sidecar
+          exit 1
+
+      - name: Test against the container
+        env:
+          SIDECAR_E2E_URL: http://localhost:8080
+          SIDECAR_E2E_TOKEN: dev-token
+          SIDECAR_E2E_PERMISSIONS: ${{ matrix.perms }}
+        run: dotnet test --solution Xakpc.SQLiteMCPSidecar.slnx --configuration Release
+
+      # The sidecar logs the cause that the agent never sees: an error code reaches the caller and
+      # the SQLite detail stays in the log.
+      - name: Sidecar log
+        if: failure()
+        run: docker logs sidecar

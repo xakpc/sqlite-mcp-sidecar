@@ -8,7 +8,9 @@
     "against any of them with no change.",
     "There is no HTTPS profile. A reverse proxy terminates TLS and the sidecar has no HTTPS",
     "redirection.",
-    "The database path is relative to the project directory, which is the working directory."
+    "The database path is relative to the project directory, which is the working directory.",
+    "The container profile runs compose.yaml at the repository root. It is the only profile that",
+    "proves the shipped behaviour: the SQLite sandbox depends on the native SQLite build."
   ],
   "profiles": {
     "read-only (schema,read)": {
@@ -48,6 +50,13 @@
         "SQLITE_SIDECAR_PERMISSIONS": "schema,read,write,backup,diagnostics,danger-raw-write",
         "SQLITE_SIDECAR_BACKUP_DIR": "../../build/dev/backups"
       }
+    },
+    "container (schema,read)": {
+      "commandName": "Docker",
+      "launchBrowser": false,
+      "httpPort": 8080,
+      "useSSL": false,
+      "dockerfileRunArguments": "-v \"$(ProjectDir)../../build/dev:/data\" -v \"$(ProjectDir)../../build/dev/backups:/backups\" -e SQLITE_SIDECAR_DB=/data/app.db -e SQLITE_SIDECAR_TOKEN=dev-token -e SQLITE_SIDECAR_PERMISSIONS=schema,read -e SQLITE_SIDECAR_BACKUP_DIR=/backups"
     }
   }
 }

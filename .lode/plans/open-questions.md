@@ -35,14 +35,14 @@ project builds with no IL warning today, and that is the check to repeat before 
 
 ## 2. Minimal container base image
 
-**Trigger.** Phase 7 and Phase 8. See
-[design/container-and-deployment.md](design/container-and-deployment.md).
+**Trigger.** Phase 8. See [../deployment/container.md](../deployment/container.md).
 
-The design asks for a minimal image with no development toolchain. The candidates are
-different if AOT succeeds.
-
-**Recommendation.** Decide after question 1. A successful AOT build permits a much smaller
-base than the `aspnet` runtime image.
+**Settled for now, and open again after question 1.** Phase 7 shipped on
+`mcr.microsoft.com/dotnet/aspnet:10.0`. The final stage carries no SDK layer, runs as a non-root
+user and adds no shell tooling, thus the remaining gain is the size of the base itself. A successful
+AOT build permits a much smaller base, and that choice belongs to the phase that produces the
+binary. Do not change the base before then: a base change and an AOT change at the same time make a
+failure hard to attribute.
 
 ## Verification tasks, not open questions
 
@@ -55,5 +55,5 @@ These items have a decision. Implementation must prove one fact for each of them
 ## Related
 
 - [mvp-roadmap.md](mvp-roadmap.md)
-- [design/](design/)
+- [../deployment/container.md](../deployment/container.md)
 - [../decisions/](../decisions/)

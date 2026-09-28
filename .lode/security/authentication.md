@@ -140,4 +140,4 @@ terminates TLS.
 - [public-endpoint.md](public-endpoint.md)
 - [permissions.md](permissions.md)
 - [../configuration/options.md](../configuration/options.md)
-- [../plans/design/security-model.md](../plans/design/security-model.md)
+- [model.md](model.md)

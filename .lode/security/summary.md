@@ -13,11 +13,9 @@ The innermost layer is in [../database/sqlite-sandbox.md](../database/sqlite-san
 capability that gives up the agent protections is in
 [../database/raw-writes.md](../database/raw-writes.md).
 
-Every tool of the catalog exists now, thus
-[../plans/design/security-model.md](../plans/design/security-model.md) and
-[../plans/design/threat-model.md](../plans/design/threat-model.md) describe the shipped product and not
-a target. They stay in `plans/design/` because they also carry the guarantee and non-guarantee lists
-that the Phase 7 documentation must copy.
+Every tool of the catalog exists now, thus [model.md](model.md) and
+[threat-model.md](threat-model.md) describe the shipped product and not a target. Both carry the
+lists that the root `README.md` and `SECURITY.md` copy, and both are the source of those copies.
 
 ## Layers today
 

@@ -6,6 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>90467880-ea95-4c3b-863f-44443b28aae5</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <!-- The build context is the repository root. The restore layer needs global.json and
+         Directory.Build.props, and both live there. -->
+    <DockerfileContext>..\..</DockerfileContext>
     <!-- Phase 8 attempts PublishAot. The analyzers run now so AOT hazards surface early. -->
     <IsAotCompatible>true</IsAotCompatible>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>

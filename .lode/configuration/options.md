@@ -144,4 +144,4 @@ gate. A comment in the file records this, because the removal is the surprising 
 - [../security/permissions.md](../security/permissions.md) — the read floor
 - [../security/authentication.md](../security/authentication.md) — the token
 - [../database/connections.md](../database/connections.md)
-- [../plans/design/container-and-deployment.md](../plans/design/container-and-deployment.md)
+- [../deployment/container.md](../deployment/container.md)

@@ -1,11 +1,14 @@
-# Security summary
+# The security model
 
-> **Status: implemented.** Every layer of this model has code, `danger-raw-write` included. The file
-> stays here because the guarantee and non-guarantee lists are what the Phase 7 `README.md` and
-> `SECURITY.md` copy from. Current state is in [../../summary.md](../../summary.md),
-> [../../security/summary.md](../../security/summary.md),
-> [../../database/sqlite-sandbox.md](../../database/sqlite-sandbox.md) and
-> [../../database/raw-writes.md](../../database/raw-writes.md).
+Every layer of this model has code, `danger-raw-write` included.
+
+**The guarantee and non-guarantee lists below are copied into the root `README.md` and
+`SECURITY.md`.** Both root files are operator-facing copies of this one. When a control changes
+here, change all three.
+
+Layer detail is in [summary.md](summary.md),
+[../database/sqlite-sandbox.md](../database/sqlite-sandbox.md) and
+[../database/raw-writes.md](../database/raw-writes.md).
 
 The sidecar is a security boundary between an AI agent and a live application database. It
 defends against two different callers: an unauthorized client, and an authorized client that
@@ -32,15 +35,15 @@ flowchart TD
     sandbox -->|fail| e4[QueryRejected]
 ```
 
-- **Request budget** — one fixed window for each process, before authentication. See [../../security/public-endpoint.md](../../security/public-endpoint.md).
-- **Bearer token** — one token for each deployment. See [../../security/authentication.md](../../security/authentication.md).
-- **Permissions** — they decide which tools exist. See [../../security/permissions.md](../../security/permissions.md).
-- **Agent protections** — structured writes, mandatory predicate, mandatory `maxRows` over every changed row, bounded pre-count, row-limit rollback, server row limit, write budget, mandatory idempotency key. See [../../database/structured-writes.md](../../database/structured-writes.md).
-- **SQLite sandbox** — authorizer, defensive mode, runtime limits, interrupt. See [sqlite-sandbox.md](../../database/sqlite-sandbox.md).
+- **Request budget** — one fixed window for each process, before authentication. See [public-endpoint.md](public-endpoint.md).
+- **Bearer token** — one token for each deployment. See [authentication.md](authentication.md).
+- **Permissions** — they decide which tools exist. See [permissions.md](permissions.md).
+- **Agent protections** — structured writes, mandatory predicate, mandatory `maxRows` over every changed row, bounded pre-count, row-limit rollback, server row limit, write budget, mandatory idempotency key. See [../database/structured-writes.md](../database/structured-writes.md).
+- **SQLite sandbox** — authorizer, defensive mode, runtime limits, interrupt. See [sqlite-sandbox.md](../database/sqlite-sandbox.md).
 
 The agent protections layer is the only layer that `danger-raw-write` makes weaker, and it
 keeps the idempotency key and the write budget. The sandbox layer stays intact. See
-[../../database/raw-writes.md](../../database/raw-writes.md).
+[../database/raw-writes.md](../database/raw-writes.md).
 
 ## Guarantees
 
@@ -71,11 +74,11 @@ absolutely safe.
 
 The MVP has **no undo**. A `delete` inside the configured limits commits, and there is no
 restore tool. The operator owns the backup strategy. See
-[../../decisions/0001-no-undo-in-mvp.md](../../decisions/0001-no-undo-in-mvp.md).
+[../decisions/0001-no-undo-in-mvp.md](../decisions/0001-no-undo-in-mvp.md).
 
 A permission applies to all tables. `write` does not protect one table from an agent that has
 `write`. See
-[../../decisions/0002-write-is-a-whole-database-grant.md](../../decisions/0002-write-is-a-whole-database-grant.md).
+[../decisions/0002-write-is-a-whole-database-grant.md](../decisions/0002-write-is-a-whole-database-grant.md).
 
 When an operator enables `danger-raw-write`, the token holder can run this statement:
 
@@ -95,7 +98,7 @@ database have two independent budgets and two independent caches.
 
 ## Related
 
-- [../../security/permissions.md](../../security/permissions.md)
-- [../../security/authentication.md](../../security/authentication.md)
-- [sqlite-sandbox.md](../../database/sqlite-sandbox.md)
+- [permissions.md](permissions.md)
+- [authentication.md](authentication.md)
+- [sqlite-sandbox.md](../database/sqlite-sandbox.md)
 - [threat-model.md](threat-model.md)

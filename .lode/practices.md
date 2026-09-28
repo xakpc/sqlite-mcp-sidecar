@@ -82,7 +82,7 @@ parameter values
 ```
 
 Raw SQL text is off by default. Log a hash of the SQL instead. See
-[plans/design/threat-model.md](plans/design/threat-model.md).
+[security/threat-model.md](security/threat-model.md).
 
 ## MCP SDK practices
 

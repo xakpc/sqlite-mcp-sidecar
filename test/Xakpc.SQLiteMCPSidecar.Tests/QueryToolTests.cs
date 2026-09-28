@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -188,6 +189,84 @@ public sealed class QueryToolTests
         var text = await CallQueryAsync(client, "SELECT id FROM jobs WHERE id = 77");
 
         Assert.Contains("77", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A locked database is an ordinary condition of this product: the owning application writes
+    /// whenever it likes. The statement itself is correct, thus the agent must read "retry later"
+    /// and not "rewrite your SQL".
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The preparation calls <c>sqlite3_prepare_v2</c> directly, thus the busy retry loop of
+    /// Microsoft.Data.Sqlite does not cover it. The busy timeout lives on the handle for that
+    /// reason, and the lock here is held for longer than the timeout, so the wait expires and the
+    /// code is what the agent sees.
+    /// </para>
+    /// <para>
+    /// The database is a rollback-journal one on purpose. A WAL writer does not block a reader,
+    /// thus WAL cannot produce this condition and the test would assert nothing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task AQueryAgainstALockedDatabaseIsDatabaseBusy()
+    {
+        await using var harness = SidecarHarness.Create(
+            "schema,read",
+            journalMode: "delete",
+            settings: new Dictionary<string, string?>
+            {
+                // One second, thus the test waits for the timeout and not for the lock holder.
+                ["BUSY_TIMEOUT_SECONDS"] = "1",
+            });
+
+        if (harness.DatabasePath is null)
+        {
+            Assert.Skip("This test locks the database file, and the external sidecar did not share its path.");
+        }
+
+        await using var client = await harness.ConnectAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        // The owning application in the middle of a write transaction.
+        await using var owner = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = harness.DatabasePath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false,
+        }.ConnectionString);
+        await owner.OpenAsync(TestContext.Current.CancellationToken);
+
+        await using var exclusive = owner.CreateCommand();
+        exclusive.CommandText = "BEGIN EXCLUSIVE;";
+        await exclusive.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+
+        try
+        {
+            var started = Stopwatch.GetTimestamp();
+            var failure = await Record.ExceptionAsync(() => CallQueryAsync(client, "SELECT id FROM jobs LIMIT 1"));
+            var elapsed = Stopwatch.GetElapsedTime(started);
+
+            Assert.IsType<McpToolFailure>(failure);
+            Assert.Contains("DatabaseBusy", failure.Message, StringComparison.Ordinal);
+
+            // The preparation waited for the busy timeout instead of failing at once. Without the
+            // handle-level timeout this call returns in a few milliseconds, because the retry loop
+            // of Microsoft.Data.Sqlite never sees a direct sqlite3_prepare_v2 call. The bound is
+            // well under the configured second, thus a slow machine does not make it flaky.
+            Assert.True(
+                elapsed > TimeSpan.FromMilliseconds(500),
+                $"The query failed after {elapsed.TotalMilliseconds:F0}ms, thus it did not wait for the busy timeout.");
+
+            // The statement is valid. Reporting it as a caller mistake would send the agent to
+            // rewrite correct SQL, and it would keep rewriting for as long as the lock is held.
+            Assert.DoesNotContain("InvalidQuery", failure.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await using var rollback = owner.CreateCommand();
+            rollback.CommandText = "ROLLBACK;";
+            await rollback.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
     }
 
     [Fact]

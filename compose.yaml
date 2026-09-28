@@ -1,0 +1,61 @@
+# A local sidecar over the dev database, and the shape that a deployment copies.
+#
+#   ./scripts/seed-dev-db.ps1        # one time. The sidecar never creates the database.
+#   docker compose up --build
+#
+# It serves http://localhost:8080/db/mcp with the token dev-token, which is what the launch profiles
+# and src/Xakpc.SQLiteMCPSidecar/mcp.http already use, thus every manual request reaches the
+# container with no change.
+#
+# A different permission set for one run:
+#
+#   SIDECAR_PERMISSIONS=schema,read,write,backup docker compose up
+
+services:
+
+  sqlite-sidecar:
+    build:
+      context: .
+      dockerfile: src/Xakpc.SQLiteMCPSidecar/Dockerfile
+    # A deployment pulls the published image instead of building it:
+    # image: ghcr.io/xakpc/sqlite-mcp-sidecar:latest
+
+    # INVARIANT: one sidecar process serves one database. The request budget, the write budget and
+    # the idempotency cache are process memory, thus a second replica makes all three weaker and
+    # reports nothing. Do not scale this service.
+    deploy:
+      replicas: 1
+
+    environment:
+      SQLITE_SIDECAR_DB: /data/app.db
+      SQLITE_SIDECAR_TOKEN: dev-token
+      # The default is the read-only set. danger-raw-write is deliberately absent: it must be an
+      # explicit operator decision and not a line that an operator copies without thought.
+      SQLITE_SIDECAR_PERMISSIONS: ${SIDECAR_PERMISSIONS:-schema,read}
+      SQLITE_SIDECAR_BACKUP_DIR: /backups
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+
+    ports:
+      # Local only. A deployment publishes no port: the reverse proxy is the one path in, and the
+      # host gate lives there.
+      - "8080:8080"
+
+    volumes:
+      # Writable, also for the read-only permission set. SQLite opens the -shm file read-write for a
+      # read-only connection to a WAL database, thus a read-only mount fails and the failure reads
+      # like a permission fault and not like a configuration fault.
+      - ./build/dev:/data
+      - ./build/dev/backups:/backups
+
+    read_only: true
+    tmpfs:
+      # SQLITE_TMPDIR points here. SQLite needs scratch space for a large sort or a spill, and the
+      # root filesystem above is read-only.
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # No healthcheck stanza. /health answers over HTTP, and a container-side probe would need curl
+    # in a runtime image that carries no shell tooling. A platform probes the path itself.

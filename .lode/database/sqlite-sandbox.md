@@ -162,9 +162,16 @@ is statement complexity and not work done. A recursive CTE is a short program th
 thus this limit does not stop a runaway query. The timeout with `sqlite3_interrupt` stops it, and
 the progress handler is the second path.
 
-The baseline does not call `sqlite3_busy_timeout`. The connection string carries `DefaultTimeout`,
-and `Microsoft.Data.Sqlite` runs its own `SQLITE_BUSY` retry loop from that value. A second
-mechanism on the same handle is a conflict and not defence in depth.
+The baseline calls `sqlite3_busy_timeout(handle, BusyTimeoutSeconds * 1000)`.
+
+**Lesson, and the earlier comment here said the opposite.** Leaving the busy timeout to
+`DefaultTimeout` on the connection string is only correct while every statement goes through
+`Microsoft.Data.Sqlite`. `ValidateSingleStatement` calls `sqlite3_prepare_v2` **directly**, thus the
+retry loop of the provider never sees that call, and the configured timeout did nothing on the read
+path: a query against a locked database failed in about 20 milliseconds with a 3-second timeout set.
+The two mechanisms compose rather than conflict — SQLite waits inside the call and the provider
+retries around it. See
+[../decisions/0009-a-locked-database-is-not-a-caller-mistake.md](../decisions/0009-a-locked-database-is-not-a-caller-mistake.md).
 
 ## Extension loading
 
@@ -184,7 +191,15 @@ statement. A non-empty tail is a second statement.
 SELECT id FROM jobs                      -- Ok
 SELECT 1; SELECT 2                       -- MultipleStatements -> InvalidQuery
 DROP TABLE jobs                          -- Rejected -> QueryRejected
+SELECT id FROM jobs                      -- Busy, when another connection holds the lock
+                                         --   -> DatabaseBusy
 ```
+
+**`Busy` is separate from `Invalid` on purpose.** A prepare that fails because another connection
+holds the lock says nothing about the statement. Folding it into `Invalid` told the agent to correct
+correct SQL, and the sidecar exists to sit next to an application that writes, thus a locked
+database is the ordinary condition here. See
+[../decisions/0009-a-locked-database-is-not-a-caller-mistake.md](../decisions/0009-a-locked-database-is-not-a-caller-mistake.md).
 
 Count statements by preparation, never by counting semicolons: a semicolon appears inside a string
 literal and inside a comment.
@@ -247,5 +262,5 @@ maps to `QueryTimedOut`.
 - [connections.md](connections.md) — the connection that this sandbox applies to
 - [../mcp/error-model.md](../mcp/error-model.md) — the codes that a rejection produces
 - [../mcp/query-results.md](../mcp/query-results.md) — the result pipeline
-- [../plans/design/threat-model.md](../plans/design/threat-model.md)
+- [../security/threat-model.md](../security/threat-model.md)
 - [raw-writes.md](raw-writes.md)

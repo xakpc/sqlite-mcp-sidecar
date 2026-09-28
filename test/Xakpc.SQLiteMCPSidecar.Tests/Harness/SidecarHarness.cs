@@ -61,11 +61,18 @@ public abstract class SidecarHarness : IAsyncDisposable
     /// </remarks>
     public virtual IServiceProvider? Services => null;
 
+    /// <summary>The journal mode that every sidecar serves unless a test asks for another one.</summary>
+    public const string DefaultJournalMode = "wal";
+
     /// <summary>
     /// Starts a sidecar with the given permission set.
     /// </summary>
     /// <param name="permissions">The deployment permission specification.</param>
-    /// <param name="journalMode"><c>wal</c>, or <c>delete</c> for a rollback-journal database.</param>
+    /// <param name="journalMode">
+    /// <c>wal</c>, or <c>delete</c> for a rollback-journal database. A test that asks for a
+    /// different mode is skipped on the external target, which serves the database that it was
+    /// started with.
+    /// </param>
     /// <param name="settings">
     /// Extra <c>SQLITE_SIDECAR_</c> values, for example a small <c>MAX_ROWS</c>. A test that passes
     /// any is skipped on the external target, which cannot restart the process.
@@ -76,7 +83,7 @@ public abstract class SidecarHarness : IAsyncDisposable
     /// </remarks>
     public static SidecarHarness Create(
         string permissions,
-        string journalMode = "wal",
+        string journalMode = DefaultJournalMode,
         IReadOnlyDictionary<string, string?>? settings = null)
     {
         if (IsExternal)
@@ -90,6 +97,15 @@ public abstract class SidecarHarness : IAsyncDisposable
             if (settings is { Count: > 0 })
             {
                 Assert.Skip("This test needs a sidecar with custom settings, and the external sidecar cannot restart.");
+            }
+
+            // The journal mode is a property of the database file, thus it belongs here with the two
+            // checks above and not in the one test that happens to need a rollback journal. Without
+            // it such a test runs against the WAL database of the external sidecar and fails on a
+            // value that the test never set. A failure that names no cause is worse than a skip.
+            if (!string.Equals(journalMode, DefaultJournalMode, StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Skip($"This test needs a '{journalMode}' journal database, and the external sidecar serves the one it started with.");
             }
 
             return external;

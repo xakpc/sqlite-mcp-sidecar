@@ -106,6 +106,11 @@ public sealed partial class SqliteTools(
                     "The request holds no statement."),
                 StatementCheck.Rejected => (SidecarError.QueryRejected,
                     "The requested action is not permitted. Only read statements are available."),
+                // The statement is correct and the database is locked. Same code that the execution
+                // path returns for SQLITE_BUSY, thus one condition gives one code wherever it
+                // appears, and the agent retries instead of rewriting the statement.
+                StatementCheck.Busy => (SidecarError.DatabaseBusy,
+                    "Another writer holds the lock. Retry the query later."),
                 _ => (SidecarError.InvalidQuery,
                     "The statement did not compile. Check the syntax and the table and column names."),
             };
@@ -633,6 +638,8 @@ public sealed partial class SqliteTools(
                     "The request holds no statement."),
                 StatementCheck.Rejected => (SidecarError.QueryRejected,
                     "The requested action is not permitted. Only INSERT, UPDATE and DELETE are available."),
+                StatementCheck.Busy => (SidecarError.DatabaseBusy,
+                    ExplanationFor(SidecarError.DatabaseBusy)),
                 _ => (SidecarError.InvalidQuery,
                     "The statement did not compile. Check the syntax and the table and column names."),
             };

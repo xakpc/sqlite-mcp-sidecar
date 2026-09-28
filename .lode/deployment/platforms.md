@@ -1,12 +1,13 @@
 # Platform deployment
 
-> **Status: planned.** This file records target design. Phase 7 builds the image and these
-> recipes. The application behaviour that the recipes depend on has code today: the `/db/mcp`
-> path and the request budget. See
-> [../../security/public-endpoint.md](../../security/public-endpoint.md).
+Four recipes: Kamal, Coolify, a plain VPS with systemd, and Fly.io. The container is identical on
+each one. Only the domain and one proxy option change, and the image needs no platform variable.
 
-Two target platforms: Kamal and Coolify. The container is identical on both. Only the domain and
-one proxy option change. The image needs no platform variable.
+**Every recipe is written out in the root `README.md`**, which is self-contained on purpose. This
+file is the source. Keep the two in agreement.
+
+The application behaviour that the recipes depend on is in
+[../security/public-endpoint.md](../security/public-endpoint.md).
 
 ## The path contract
 
@@ -17,8 +18,9 @@ flowchart TD
     proxy -->|"container port, /health"| hp[Probe]
 ```
 
-**Invariant.** The proxy forwards the path with no change. Both platforms strip a matched prefix by
-default, thus each recipe must **turn stripping off**.
+**Invariant.** The proxy forwards the path with no change. Kamal and Coolify both strip a matched
+prefix by default, thus each of those recipes must **turn stripping off**. A hand-written Caddy or
+nginx rule strips nothing unless it is told to, and Fly.io routes a whole host.
 
 | Platform | Setting |
 | --- | --- |
@@ -27,7 +29,7 @@ default, thus each recipe must **turn stripping off**.
 
 A stripped prefix gives a `404`. That is the one failure that this contract prevents, and it is why
 the application owns the full path. See
-[../../security/public-endpoint.md](../../security/public-endpoint.md).
+[../security/public-endpoint.md](../security/public-endpoint.md).
 
 ## Kamal
 
@@ -36,7 +38,7 @@ multi-region role set: name the host that holds the database.
 
 ```yaml
 service: sqlite-sidecar
-image: <owner>/sqlite-sidecar-mcp
+image: ghcr.io/xakpc/sqlite-mcp-sidecar
 servers:
   app:
     hosts: [<host that holds the database>]
@@ -81,7 +83,38 @@ Volume            <host data directory>:/data, writable
 Coolify runs Traefik, thus a rate-limit middleware is available there. It is not necessary: the
 in-process budget is active on each platform, and a second limit needs a second reason.
 
-## Common to both
+## A plain VPS with systemd
+
+No orchestrator. A `docker run` under a unit file, with the port bound to loopback:
+
+```text
+-p 127.0.0.1:8080:8080      # only a proxy on the same host reaches it
+--env-file /etc/sqlite-sidecar.env    # mode 0600, it holds the token
+--read-only --tmpfs /tmp
+--cap-drop=ALL --security-opt=no-new-privileges
+```
+
+`Restart=always` plus `ExecStartPre=-/usr/bin/docker rm -f` makes a restart idempotent after an
+unclean stop. Caddy or nginx terminates TLS and forwards the path with no change.
+
+## Fly.io
+
+A Fly Volume attaches to exactly one machine, which suits this product: one file, one writer, one
+sidecar.
+
+```text
+[[mounts]] source = "app_data", destination = "/data"
+[http_service] internal_port = 8080, auto_stop_machines = false, min_machines_running = 1
+[[http_service.checks]] path = "/health"
+fly secrets set SQLITE_SIDECAR_TOKEN=...
+```
+
+**Invariant, and it is the one that fails quietly here.** The sidecar and the owning application
+must run on the **same machine**. A volume attaches to one machine, thus two machines means two
+different database files and each process serves its own copy. Keep `auto_stop_machines = false`
+and do not scale the app.
+
+## Common to each recipe
 
 | Item | Value | Reason |
 | --- | --- | --- |
@@ -102,7 +135,7 @@ Claude Code and an `mcp.json` entry do.
 ```
 
 One configured agent is the expected consumer. See
-[../out-of-scope.md](../out-of-scope.md) for the OAuth exclusion.
+[../plans/out-of-scope.md](../plans/out-of-scope.md) for the OAuth exclusion.
 
 ## Token rotation
 
@@ -112,7 +145,9 @@ MVP. A rotation window needs a list of valid tokens, and that is a new feature.
 
 ## Related
 
-- [container-and-deployment.md](container-and-deployment.md) — the image, the volumes, the compose example
-- [../../security/public-endpoint.md](../../security/public-endpoint.md) — the paths and the budget
-- [../../security/authentication.md](../../security/authentication.md) — the token
-- [threat-model.md](threat-model.md) — the public flood
+- [container.md](container.md) — the image, the volumes, the compose example
+- [distribution.md](distribution.md) — the published image
+- [summary.md](summary.md)
+- [../security/public-endpoint.md](../security/public-endpoint.md) — the paths and the budget
+- [../security/authentication.md](../security/authentication.md) — the token
+- [../security/threat-model.md](../security/threat-model.md) — the public flood

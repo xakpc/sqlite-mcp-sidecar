@@ -33,8 +33,10 @@ cache and write budget, under a third authorizer policy that also refuses a writ
 object. It gives up `maxRows`, the pre-count and the rollback, and it gives up nothing of the SQLite
 sandbox.
 
-**Every product capability is now implemented.** What is left is the container and the documentation
-(Phase 7) and the NativeAOT attempt (Phase 8).
+**Every product capability is implemented, and the product ships.** The image is non-root,
+hardened and multi-architecture, tagged builds publish to `ghcr.io/xakpc/sqlite-mcp-sidecar`, CI
+runs the suite against that image, and `README.md`, `SECURITY.md` and `LICENSE` exist. What is left
+is the NativeAOT attempt (Phase 8).
 
 | Area | State |
 | --- | --- |
@@ -55,15 +57,17 @@ sandbox.
 | Backup, the step loop and the restart cap | Implemented — [database/backups.md](database/backups.md) |
 | Diagnostics | Implemented — [database/diagnostics.md](database/diagnostics.md) |
 | `execute_write_sql` and the DML authorizer policy | Implemented — [database/raw-writes.md](database/raw-writes.md) |
-| Container and documentation | Not started — Phase 7 |
+| Container, compose and the CI container run | Implemented — [deployment/container.md](deployment/container.md) |
+| The published image | Implemented — [deployment/distribution.md](deployment/distribution.md) |
+| Operator documentation | Implemented — `README.md`, `SECURITY.md`, `LICENSE` |
 | NativeAOT | Analyzers on. The publish attempt is Phase 8 |
 
-**The hard boundaries are proven on Windows only.** The sandbox depends on the native SQLite build,
-thus the boundary suite is fully proven when Phase 7 points the external target at the Linux
-container. See [testing/e2e-harness.md](testing/e2e-harness.md).
+**The hard boundaries are proven on Linux.** The sandbox depends on the native SQLite build, thus
+the boundary list runs against the container in CI for two permission sets, once through `query` and
+once through `execute_write_sql`. See [testing/e2e-harness.md](testing/e2e-harness.md).
 
-The remaining design lives under [plans/design/](plans/design/), and each file there carries a
-status banner. Content moves out of `plans/design/` into a domain directory when code implements it.
+`plans/design/` is gone. Every file that was there is current state now, under
+[deployment/](deployment/) and [security/](security/).
 
 ## Repository layout
 
@@ -71,7 +75,14 @@ status banner. Content moves out of `plans/design/` into a domain directory when
 Xakpc.SQLiteMCPSidecar.slnx
 Directory.Build.props              # output to build/bin, build/obj
 global.json                        # selects the Microsoft.Testing.Platform test runner
-.github/workflows/ci.yml           # build and test on Linux
+README.md                          # self-contained: recipes, variables and security inline
+SECURITY.md                        # the security half again, where GitHub reads it
+LICENSE                            # Apache-2.0
+compose.yaml                       # the local run and the copy-paste example
+.dockerignore                      # for the repository-root build context
+.github/workflows/ci.yml           # build and test on Linux, then the suite against the image
+.github/workflows/release.yml      # tag v* publishes to ghcr.io, amd64 and arm64
+docs/agents/                       # agent skills: issue-tracker.md, triage-labels.md, domain.md
 scripts/
     seed-dev-db.ps1                # builds build/dev/app.db, run it before the first launch
     dev-sidecar.ps1                # a live sidecar with any permission set
@@ -79,15 +90,18 @@ scripts/
 src/Xakpc.SQLiteMCPSidecar/
     Program.cs
     mcp.http                       # manual MCP requests
-    Dockerfile                     # still the Visual Studio template, Phase 7
-    Properties/launchSettings.json # one profile for each deployment shape
+    Dockerfile                     # root build context, cross-compiles to $TARGETARCH
+    Properties/launchSettings.json # three project profiles and one container profile
     Configuration/                 SidecarOptions.cs, SidecarStartup.cs
     Database/                      SqliteService.cs, SqliteSecurity.cs, QueryResult.cs,
                                    StructuredWriteBuilder.cs, BackupService.cs
+    Exceptions/                    SidecarConfigurationException.cs, StatementRejectedException.cs,
+                                   InvalidWriteException.cs, WriteLimitExceededException.cs
     Mcp/                           SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs
     Security/                      PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs,
                                    WriteBudget.cs, WriteDeduplication.cs
 test/Xakpc.SQLiteMCPSidecar.Tests/
+    GlobalUsings.cs
     Harness/                       SidecarHarness.cs
     Fixtures/                      sample-db.sql, SampleDatabase.cs, DevDatabaseTests.cs
     StartupTests.cs, AuthTests.cs, PermissionGatingTests.cs, SchemaToolTests.cs
@@ -165,5 +179,6 @@ See [testing/e2e-harness.md](testing/e2e-harness.md).
 - [practices.md](practices.md) — rules for the code we write.
 - [decisions/](decisions/) — decisions that are difficult to reverse.
 - [plans/mvp-roadmap.md](plans/mvp-roadmap.md) — the phased plan.
-- [plans/design/security-model.md](plans/design/security-model.md) — the security model.
+- [security/model.md](security/model.md) — the security model, and what README.md and SECURITY.md copy.
+- [deployment/summary.md](deployment/summary.md) — the image, the registry and the recipes.
 - [database/sqlite-sandbox.md](database/sqlite-sandbox.md) — the always-on SQLite controls.

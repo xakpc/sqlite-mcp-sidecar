@@ -223,8 +223,17 @@ against a WAL database. `SampleDatabase.CreateAt` now applies the mode after the
 when SQLite reports a different one. `DiagnosticsToolTests.DiagnosticsReportsARollbackJournalDatabase`
 is what exposed it, because it is the first test that asserts the reported mode.
 
-Run the functional suite against the published Linux artifact. The sandbox depends on the
-native SQLite build, thus a Windows developer run does not prove the shipped behavior.
+**The functional suite runs against the Linux container in CI.** The sandbox depends on the native
+SQLite build, thus a Windows developer run does not prove the shipped behaviour. `container-e2e` in
+`.github/workflows/ci.yml` builds the image, seeds a database and runs the suite over it for two
+permission sets. See [../testing/e2e-harness.md](../testing/e2e-harness.md).
+
+**A query against a locked database returns `DatabaseBusy`.**
+`QueryToolTests.AQueryAgainstALockedDatabaseIsDatabaseBusy` holds `BEGIN EXCLUSIVE` from a second
+connection and asserts both the code and that the call waited for the busy timeout. It needs a
+rollback-journal database, because a WAL writer does not block a reader and the condition cannot be
+produced in WAL at all. See
+[../decisions/0009-a-locked-database-is-not-a-caller-mistake.md](../decisions/0009-a-locked-database-is-not-a-caller-mistake.md).
 
 
 ## Related

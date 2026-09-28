@@ -42,6 +42,52 @@ honestly instead of reporting a false failure.
 The external target needs `SIDECAR_E2E_PERMISSIONS`, because the harness cannot learn the permission
 set of a process that it did not start.
 
+## The three skip rules, and they all live in `Create`
+
+| The test asks for | External target | Why |
+| --- | --- | --- |
+| A different permission set | Skip | The process cannot be restarted. |
+| Any `settings:` value | Skip | Same reason. |
+| A `journalMode` other than `wal` | Skip | The journal mode is a property of the file that the sidecar already serves. |
+
+**Lesson.** The third rule was missing, and one test guarded itself by hand while another did not.
+`DiagnosticsToolTests.DiagnosticsReportsARollbackJournalDatabase` asks for `journalMode: "delete"`,
+thus against a WAL container it ran and asserted a value that it never set. A rule that belongs to
+the harness must live in the harness: a per-test guard covers the tests that someone remembered.
+
+A test that needs the database file or the backup directory skips too, because
+`ExternalSidecarHarness` returns `null` for `DatabasePath`, `BackupDirectory` and `Services`. The
+six `BackupToolTests` file assertions are in that group. They stay skipped on purpose: exposing the
+host side of the bind mount would buy a fourth environment variable and a
+bind-mount-and-not-a-named-volume constraint, for assertions about file naming rather than about
+native SQLite. The task result still proves that the copy ran.
+
+## The container run in CI
+
+`.github/workflows/ci.yml` has a second job, `container-e2e`. It builds the image, seeds a database,
+starts the container and points the suite at it. This is the run that proves the shipped artifact,
+because the sandbox depends on the native SQLite build.
+
+**It is a matrix of two permission sets, and not of all eight.** `PermissionsMatch` is an exact-set
+match, thus one container run only exercises the tests that ask for exactly that set:
+
+| Set | What it proves |
+| --- | --- |
+| `schema,read` | The hard-boundary list through `query`, plus auth, gating and the result path. |
+| `schema,read,danger-raw-write` | The hard-boundary list a second time through `execute_write_sql`, plus the DML policy. |
+
+The remaining sets exercise .NET logic that the in-process job already runs on Linux. A matrix entry
+that adds a set adds a container start for tests that the first job already covers.
+
+**The container target shares one database across the whole run.** The in-process harness gives each
+test its own file; the container has one mounted database and every test in that run works on it.
+Each matrix entry therefore seeds a fresh database, and a new test that asserts an absolute row
+count must not assume an untouched fixture.
+
+**The mount needs `chmod -R 0777` in CI.** The image runs as uid 1654, which the host does not know,
+and the mount must be writable also for `schema,read`. See
+[../deployment/container.md](../deployment/container.md).
+
 ## Custom settings and the database path
 
 ```csharp
@@ -125,9 +171,11 @@ There are two ways to start a sidecar by hand, and both serve `http://localhost:
 `privileged (all permissions)`. `SQLITE_SIDECAR_DB` is `../../build/dev/app.db`, which is relative
 to the project directory, and that directory is the working directory and the content root.
 
-There is no HTTPS profile, because a reverse proxy terminates TLS and the sidecar has no HTTPS
-redirection. There is no container profile, because the Dockerfile is still the template and it
-mounts no database. Phase 7 adds one.
+A fourth profile, `container (schema,read)`, runs the image over the same dev database. There is no
+HTTPS profile, because a reverse proxy terminates TLS and the sidecar has no HTTPS redirection.
+
+`docker compose up --build` is the other way to reach the container, and it serves the same port and
+token. See [../deployment/container.md](../deployment/container.md).
 
 **The script**, for a permission set that no profile carries, and for a startup failure:
 
@@ -151,7 +199,7 @@ variables match both paths.
 | `PermissionGatingTests` | `tools/list` per permission set, the backstop rejection, the exposed tool set, and a description on each tool. |
 | `SchemaToolTests` | Usable DDL, no internal `sqlite_%` objects, no row data, and no database path. |
 | `SandboxBoundaryTests` | Each hard boundary through `query`: `ATTACH`, DDL, pragmas, `VACUUM INTO`, `load_extension`, writes, transaction control, more than one statement. Also that a rejection names no path and that the permission set does not weaken any of it. |
-| `QueryToolTests` | TOON output, the `truncated` flag, an empty result, ordinary SQL functions, repeated column names, both truncation limits, `ResultTooLarge`, the timeout interrupt, a read while the application writes, and the absence of `query` without the `read` permission. |
+| `QueryToolTests` | TOON output, the `truncated` flag, an empty result, ordinary SQL functions, repeated column names, both truncation limits, `ResultTooLarge`, the timeout interrupt, a read while the application writes, a read against a locked database, and the absence of `query` without the `read` permission. |
 
 **Lesson.** A tool failure arrives as a `CallToolResult` with `IsError` set, and not as a transport
 exception. `CallQueryAsync` and `CallSchemaAsync` raise `McpToolFailure` for that shape, thus a test

@@ -69,7 +69,7 @@ with the one-identity model. A public endpoint does not change this: the consume
 the operator configures, and such a client sends a static header. An OAuth client that needs
 resource-metadata discovery cannot connect, and that is accepted. See
 [../security/authentication.md](../security/authentication.md) and
-[design/platform-deployment.md](design/platform-deployment.md).
+[../deployment/platforms.md](../deployment/platforms.md).
 
 **Token rotation windows and per-caller rate partitions.** Both need a list in place of one value: a
 set of valid tokens, or a caller identity to partition by. The deployment has one token and one
@@ -128,7 +128,7 @@ the bundled native SQLite and the `Toon.DotNet` package. Examine this again only
 concrete, recorded reason.
 
 **Prometheus and OpenTelemetry.** Structured ASP.NET Core logs are sufficient for the MVP. See
-[design/threat-model.md](design/threat-model.md) for the logging constraints.
+[../security/threat-model.md](../security/threat-model.md) for the logging constraints.
 
 **Plugin architecture and generic database abstractions.** Speculative extensibility. The
 project follows YAGNI. See [../practices.md](../practices.md).

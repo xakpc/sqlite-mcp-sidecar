@@ -192,7 +192,7 @@ static string Render(string format, string name, List<(string Key, string Value)
         case "docker compose":
             text.AppendLine("services:");
             text.AppendLine($"  {name}:");
-            text.AppendLine("    image: sqlite-sidecar-mcp:latest");
+            text.AppendLine("    image: ghcr.io/xakpc/sqlite-mcp-sidecar:latest");
             text.AppendLine("    environment:");
             foreach (var (key, value) in settings)
             {

@@ -12,7 +12,9 @@ flowchart TD
     root --> p[practices.md]
     root --> m[lode-map.md]
     root --> cfg[configuration/]
-    root --> sec[security/ — summary, authentication, permissions, public-endpoint, write-controls]
+    root --> sec[security/ — summary, model, threat-model, authentication, permissions,
+                  public-endpoint, write-controls]
+    root --> dep[deployment/ — summary, container, platforms, distribution]
     root --> dbd[database/]
     root --> mcpd[mcp/]
     root --> tst[testing/]
@@ -27,12 +29,11 @@ flowchart TD
     plans --> rt[required-tests.md]
     plans --> oq[open-questions.md]
     plans --> oos[out-of-scope.md]
-    plans --> d[design/]
 ```
 
-A domain directory holds current state. `plans/design/` holds what no code has landed yet, and the two
-model files that the Phase 7 documentation copies from. A file moves out of `plans/design/` when code
-implements it, and it is rewritten as current state.
+A domain directory holds current state. `plans/` holds what no code has landed yet. A file moves out
+of `plans/` when code implements it, and it is rewritten as current state. `plans/design/` is gone:
+every file it held is current state now, under `deployment/` and `security/`.
 
 ## Root
 
@@ -54,6 +55,8 @@ implements it, and it is rewritten as current state.
 | File | Contents |
 | --- | --- |
 | [security/summary.md](security/summary.md) | The layers that have code today. |
+| [security/model.md](security/model.md) | The layered security model, the guarantees list, the non-guarantees list. **`README.md` and `SECURITY.md` copy from here.** Start here. |
+| [security/threat-model.md](security/threat-model.md) | Agent mistakes, the mitigation map, the mistake that the MVP does not mitigate, attacker goals and blocks, logging and errors as leak surfaces. |
 | [security/authentication.md](security/authentication.md) | The deployment token, the constant-time comparison, the permission claims, the identical 401, the health endpoint, the network model. |
 | [security/public-endpoint.md](security/public-endpoint.md) | The two paths and the path contract, the request budget, the middleware order, the absent host filtering, the forwarded address in a log. |
 | [security/permissions.md](security/permissions.md) | The six permissions, the read floor, the claim and policy mechanism, the two gating layers, the invariants, the risk table. |
@@ -101,6 +104,7 @@ trade-off.
 | [decisions/0006-backup-restart-cap.md](decisions/0006-backup-restart-cap.md) | The backup cap counts restarts, not seconds. The measured write rates. |
 | [decisions/0007-tasks-over-a-status-tool.md](decisions/0007-tasks-over-a-status-tool.md) | MCP Tasks replaced `backup_status`. Why the execution mode selector is load-bearing. |
 | [decisions/0008-a-committed-raw-write-never-fails-on-result-size.md](decisions/0008-a-committed-raw-write-never-fails-on-result-size.md) | A truncated `RETURNING` result commits. Why the reader is drained and why `ResultTooLarge` would be a lie. |
+| [decisions/0009-a-locked-database-is-not-a-caller-mistake.md](decisions/0009-a-locked-database-is-not-a-caller-mistake.md) | `SQLITE_BUSY` at preparation is `DatabaseBusy` and not `InvalidQuery`, and the busy timeout lives on the handle. Why the container run found it and no in-process test could. |
 
 ## plans/
 
@@ -111,16 +115,14 @@ trade-off.
 | [plans/open-questions.md](plans/open-questions.md) | The NativeAOT pair, MCP Tasks for `backup`, and the remaining verification tasks. |
 | [plans/out-of-scope.md](plans/out-of-scope.md) | Excluded features and the reason for each exclusion. |
 
-## plans/design/
-
-Design that no code has landed yet, plus the two model files that the Phase 7 documentation copies from. One topic for each file.
+## deployment/
 
 | File | Contents |
 | --- | --- |
-| [security-model.md](plans/design/security-model.md) | The layered security model, the guarantees list, the non-guarantees list. Start here. |
-| [threat-model.md](plans/design/threat-model.md) | Agent mistakes, mitigation map, the mistake that the MVP does not mitigate, attacker goals and blocks, logging and errors as leak surfaces. |
-| [container-and-deployment.md](plans/design/container-and-deployment.md) | Deployment shape, compose example, filesystem access, image hardening, current Dockerfile gaps, build output. |
-| [platform-deployment.md](plans/design/platform-deployment.md) | Kamal and Coolify recipes, the proxy path options, the healthcheck path, replicas, the client header, token rotation. |
+| [deployment/summary.md](deployment/summary.md) | How the sidecar ships, the three rules every recipe repeats, and where the operator documentation lives. |
+| [deployment/container.md](deployment/container.md) | The repository-root build context, cross-compilation, the final stage, hardening, filesystem access, `compose.yaml`, the container launch profile. |
+| [deployment/platforms.md](deployment/platforms.md) | The path contract, then Kamal, Coolify, a plain VPS with systemd and Fly.io. The client header and token rotation. |
+| [deployment/distribution.md](deployment/distribution.md) | GHCR and why not Docker Hub, the trigger and tag scheme, both architectures, provenance. |
 
 ## tmp/
 
@@ -138,9 +140,10 @@ documents go here.
 | Touch a backup | `database/backups.md`, `decisions/0006-backup-restart-cap.md`, `decisions/0007-tasks-over-a-status-tool.md` |
 | Add or change a tool | `mcp/tool-catalog.md`, `security/permissions.md`, `mcp/error-model.md` |
 | Touch authentication | `security/authentication.md`, `security/permissions.md` |
-| Touch an endpoint, a path or a rate limit | `security/public-endpoint.md`, `plans/design/platform-deployment.md` |
+| Touch an endpoint, a path or a rate limit | `security/public-endpoint.md`, `deployment/platforms.md` |
 | Touch configuration | `configuration/options.md` |
 | Touch a write path | `database/structured-writes.md`, `database/raw-writes.md`, `security/write-controls.md`, `decisions/0004-maxrows-bounds-total-changes.md` |
-| Write documentation | `plans/design/security-model.md`, `security/permissions.md`, `database/raw-writes.md`, `decisions/` |
-| Touch the container or the launch configuration | `plans/design/container-and-deployment.md`, `testing/e2e-harness.md` |
+| Write documentation | `security/model.md`, `security/threat-model.md`, `security/permissions.md`, and then `README.md` and `SECURITY.md`, which are copies |
+| Touch the container or the launch configuration | `deployment/container.md`, `testing/e2e-harness.md` |
+| Publish or deploy the image | `deployment/distribution.md`, `deployment/platforms.md` |
 | Consider a new feature | `plans/out-of-scope.md`, `decisions/` |

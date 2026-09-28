@@ -43,6 +43,12 @@ internal enum StatementCheck
 
     /// <summary>The statement did not prepare: malformed SQL, an unknown table, or a limit.</summary>
     Invalid,
+
+    /// <summary>
+    /// Another connection holds the lock and the busy timeout expired. The statement itself is
+    /// correct, thus this is not <see cref="Invalid"/>: the agent retries instead of rewriting it.
+    /// </summary>
+    Busy,
 }
 
 /// <summary>
@@ -123,9 +129,16 @@ internal static class SqliteSecurity
         raw.sqlite3_limit(handle, raw.SQLITE_LIMIT_LIKE_PATTERN_LENGTH, MaxLikePatternLength);
         raw.sqlite3_limit(handle, raw.SQLITE_LIMIT_VDBE_OP, MaxVdbeOperations);
 
-        // The busy timeout is not set here. The connection string carries DefaultTimeout, and
-        // Microsoft.Data.Sqlite runs its own SQLITE_BUSY retry loop from that value. A second
-        // mechanism on the same handle is a conflict and not defence in depth.
+        // The busy timeout belongs on the handle, because the sidecar does not reach SQLite through
+        // Microsoft.Data.Sqlite alone. ValidateSingleStatement calls sqlite3_prepare_v2 directly,
+        // thus the DefaultTimeout retry loop of the provider never sees that call: without this
+        // line a prepare against a locked database fails in milliseconds and the configured
+        // SQLITE_SIDECAR_BUSY_TIMEOUT_SECONDS does nothing on the read path.
+        //
+        // The provider keeps its own retry loop on top of this one. They compose: SQLite waits
+        // inside the call and the provider retries around it, thus the handle-level wait is what
+        // the agent actually gets.
+        raw.sqlite3_busy_timeout(handle, options.BusyTimeoutSeconds * 1000);
     }
 
     /// <summary>
@@ -187,6 +200,14 @@ internal static class SqliteSecurity
             if (result == raw.SQLITE_AUTH)
             {
                 return StatementCheck.Rejected;
+            }
+
+            // A lock is not a syntax error. The owning application writes while the sidecar reads,
+            // thus a busy database is an ordinary condition of this product and not a caller
+            // mistake. Reporting it as Invalid would tell the agent to rewrite a correct statement.
+            if (result is raw.SQLITE_BUSY or raw.SQLITE_LOCKED)
+            {
+                return StatementCheck.Busy;
             }
 
             if (result != raw.SQLITE_OK)

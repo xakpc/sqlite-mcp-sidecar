@@ -66,6 +66,7 @@ flowchart TD
     shape -->|more than one, or empty| iq[InvalidQuery]
     shape -->|authorizer rejected| qr[QueryRejected]
     shape -->|did not prepare| iq
+    shape -->|locked, busy timeout expired| db
     shape -->|passed| run[Execute]
     run --> sq{SqliteErrorCode}
     sq -->|23 AUTH| qr
@@ -129,6 +130,12 @@ one write slot is bounded by `BUSY_TIMEOUT_SECONDS`. From the view of the agent 
 another writer holds the lock, thus retry later. See
 [../database/connections.md](../database/connections.md).
 
+**A third `DatabaseBusy` source is statement preparation.** `SQLITE_BUSY` and `SQLITE_LOCKED` out of
+`sqlite3_prepare_v2` become `StatementCheck.Busy`, which both switch sites map to `DatabaseBusy`.
+The condition reached the agent as `InvalidQuery` before, which asks the agent to rewrite a correct
+statement. See
+[../decisions/0009-a-locked-database-is-not-a-caller-mistake.md](../decisions/0009-a-locked-database-is-not-a-caller-mistake.md).
+
 ## `WriteLimitExceeded` has one code for two checks
 
 A structured `update` or `delete` can fail the bounded pre-count, or it can fail the count after
@@ -178,6 +185,6 @@ never goes out without a change.
 
 - [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md)
 - [query-results.md](query-results.md)
-- [../plans/design/threat-model.md](../plans/design/threat-model.md)
+- [../security/threat-model.md](../security/threat-model.md)
 - [../database/structured-writes.md](../database/structured-writes.md)
 - [../database/raw-writes.md](../database/raw-writes.md)

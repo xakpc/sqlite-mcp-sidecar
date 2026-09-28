@@ -25,7 +25,7 @@ A proxy that strips a prefix gives a `404` that looks like a server fault, and p
 the part of a proxy configuration that fails quietly. A full path in the application makes the
 mistake impossible: the proxy matches the prefix `/db` and forwards the request with no change. The
 platform settings are in
-[../plans/design/platform-deployment.md](../plans/design/platform-deployment.md).
+[../deployment/platforms.md](../deployment/platforms.md).
 
 The stateless transport makes this safe. The server never sends its own endpoint URL to the client,
 thus a path prefix cannot appear in a response. The 1.x SSE transport did send that URL. See
@@ -129,5 +129,5 @@ The rate limit is global, thus a forged header changes a log line only. It canno
 
 - [authentication.md](authentication.md) — the token and the identical 401
 - [permissions.md](permissions.md) — what a valid token may do
-- [../plans/design/platform-deployment.md](../plans/design/platform-deployment.md) — Kamal and Coolify
-- [../plans/design/threat-model.md](../plans/design/threat-model.md) — the flood as an attack
+- [../deployment/platforms.md](../deployment/platforms.md) — Kamal and Coolify
+- [threat-model.md](threat-model.md) — the flood as an attack

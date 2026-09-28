@@ -1,13 +1,13 @@
 # MVP roadmap
 
-The sequence from the stock template to the MVP. The target design for each item is in
-[design/](design/). Scope exclusions are in [out-of-scope.md](out-of-scope.md). Unresolved
-decisions are in [open-questions.md](open-questions.md).
+The sequence from the stock template to the MVP. Each phase names the lode files that hold its
+current state. Scope exclusions are in [out-of-scope.md](out-of-scope.md). Unresolved decisions are
+in [open-questions.md](open-questions.md).
 
 ## Current state
 
-Phase 0 to Phase 6 are done. Phase 2 and Phase 3 shipped together. The product capabilities are
-complete, thus what is left is the container, the documentation and the NativeAOT attempt. See
+Phase 0 to Phase 7 are done. Phase 2 and Phase 3 shipped together. The product ships as a published
+multi-architecture image with operator documentation, thus only the NativeAOT attempt is left. See
 [../summary.md](../summary.md) for the status table.
 
 ## Sequence
@@ -20,7 +20,7 @@ flowchart TD
     p4a --> p4b[Phase 4b: the filter, update and delete — done]
     p4b --> p5[Phase 5: backup and diagnostics — done]
     p5 --> p6[Phase 6: danger-raw-write — done]
-    p6 --> p7[Phase 7: container and docs]
+    p6 --> p7[Phase 7: container and docs — done]
     p7 --> p8[Phase 8: NativeAOT attempt]
 ```
 
@@ -190,18 +190,49 @@ the commit, and the result size therefore never fails a committed raw write. See
 `BEGIN IMMEDIATE` is what rejects it, with `cannot VACUUM from within a transaction`, thus the code is
 `DatabaseError` and the test asserts the fact that matters: no file appears.
 
-### Phase 7 — container and documentation
+### Phase 7 — container, distribution and documentation. Done
 
-- Rework the Dockerfile. See [design/container-and-deployment.md](design/container-and-deployment.md).
-- Write the Kamal and Coolify recipes, and state the path contract in the README: the proxy must **not** strip the `/db` prefix. See [design/platform-deployment.md](design/platform-deployment.md).
-- Add the container launch configuration back: a `compose.yaml` and a container launch profile. The template profile is gone, because it mounts no database and it opens an HTTPS port. See [design/container-and-deployment.md](design/container-and-deployment.md).
-- Point the e2e suite at the container and add that run to CI. This satisfies the rule that the functional suite runs against the published Linux artifact. See [../testing/e2e-harness.md](../testing/e2e-harness.md).
-- `README.md` with the permission risk table, the whole-database write statement and the one-sidecar rule.
-- `SECURITY.md` with the required `danger-raw-write` statement, the no-undo statement, the budget-throttle statement, the one-token rotation limit and the rule that the container port never faces the internet. See [../security/public-endpoint.md](../security/public-endpoint.md).
-- `LICENSE`, Apache-2.0.
+Current state: [../deployment/summary.md](../deployment/summary.md),
+[../deployment/container.md](../deployment/container.md),
+[../deployment/platforms.md](../deployment/platforms.md),
+[../deployment/distribution.md](../deployment/distribution.md),
+[../testing/e2e-harness.md](../testing/e2e-harness.md),
+[../decisions/0009-a-locked-database-is-not-a-caller-mistake.md](../decisions/0009-a-locked-database-is-not-a-caller-mistake.md).
 
-Done when: the image runs as non-root over a mounted database, `docker compose up` gives a working
-sidecar, and `SIDECAR_E2E_URL` pointed at it passes the whole suite.
+The image is non-root, single-port, hardened and multi-architecture, `compose.yaml` runs it over the
+dev database, CI runs the suite against it, tagged builds publish to
+`ghcr.io/xakpc/sqlite-mcp-sidecar`, and `README.md`, `SECURITY.md` and `LICENSE` exist.
+
+The README is **self-contained**: every recipe, every variable and every security statement is
+inline, and it links to no other file in the repository. `SECURITY.md` repeats the security half,
+because GitHub reads that file and not the README for a vulnerability report. Both are copies of
+[../security/model.md](../security/model.md) and
+[../security/threat-model.md](../security/threat-model.md), which is why those two moved out of
+`plans/design/` into `security/`.
+
+**The build context moved to the repository root**, and that was not cosmetic. The `.dockerignore`
+sat at the root while the context was `src/`, thus Docker never read it, and `global.json` and
+`Directory.Build.props` were outside the context as well. Two of the three were invisible failures:
+nothing reported them.
+
+**The container run is a matrix of two permission sets, not of all eight.** `PermissionsMatch` is an
+exact-set match, thus one run covers only the tests that ask for exactly that set. `schema,read` and
+`schema,read,danger-raw-write` carry the hard-boundary list twice, which is what the native build
+puts at risk.
+
+**Lesson, and it is the reason this phase existed.** The container run found a defect that no
+in-process test could reach. The in-process harness gives each test its own database file, thus two
+clients never hold one file and `SQLITE_BUSY` never happens. On one shared database a correct
+`SELECT` came back as `InvalidQuery: The statement did not compile`, because every prepare failure
+that was not `SQLITE_AUTH` became `Invalid` — and the configured busy timeout never applied to the
+read path at all, because `ValidateSingleStatement` calls `sqlite3_prepare_v2` directly and the
+retry loop of `Microsoft.Data.Sqlite` never saw it. A query against a locked database failed in 20
+milliseconds with a 3-second timeout set. See
+[../decisions/0009-a-locked-database-is-not-a-caller-mistake.md](../decisions/0009-a-locked-database-is-not-a-caller-mistake.md).
+
+**Lesson about the harness.** A skip rule that belongs to the harness must live in the harness.
+`journalMode` had no external-target guard, thus one test guarded itself by hand and another one did
+not and would have failed against any WAL container.
 
 ### Phase 8 — NativeAOT
 
@@ -232,7 +263,7 @@ handling and container isolation.
 ## Related
 
 - [required-tests.md](required-tests.md) — the mandatory test lists
-- [design/](design/) — the target design for each topic
+- [../deployment/summary.md](../deployment/summary.md) — the image and the recipes
 - [out-of-scope.md](out-of-scope.md)
 - [open-questions.md](open-questions.md)
 - [../decisions/](../decisions/)

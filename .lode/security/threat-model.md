@@ -1,18 +1,20 @@
 # Threat model
 
-> **Status: implemented.** Every mitigation of this model has code, on the read path and on both write
-> paths. See [../../database/sqlite-sandbox.md](../../database/sqlite-sandbox.md),
-> [../../mcp/query-results.md](../../mcp/query-results.md),
-> [../../database/structured-writes.md](../../database/structured-writes.md) and
-> [../../database/raw-writes.md](../../database/raw-writes.md). The file stays here because the
-> mitigation map is what the Phase 7 documentation copies from.
+Every mitigation of this model has code, on the read path and on both write paths. See
+[../database/sqlite-sandbox.md](../database/sqlite-sandbox.md),
+[../mcp/query-results.md](../mcp/query-results.md),
+[../database/structured-writes.md](../database/structured-writes.md) and
+[../database/raw-writes.md](../database/raw-writes.md).
+
+**The mitigation map, the attacker table and the out-of-scope list are copied into the root
+`SECURITY.md`.** Keep the two in agreement.
 
 The sidecar defends against two callers. The second one is unusual and it drives most of the
 product design.
 
 1. An **unauthorized client**. The bearer token stops it. The endpoint can be public, thus this
    caller can also be an unknown internet client that sends many requests. The request budget bounds
-   it. See [../../security/public-endpoint.md](../../security/public-endpoint.md).
+   it. See [public-endpoint.md](public-endpoint.md).
 2. An **authorized but mistaken agent**. The agent protections stop it.
 
 ## Agent mistakes
@@ -58,7 +60,7 @@ flowchart TD
 A delete that cascades is the case where the obvious implementation fails: the rows of the target
 table stay inside `maxRows` while an unbounded subtree disappears. `maxRows` therefore counts every
 row the statement changes. See
-[../../decisions/0004-maxrows-bounds-total-changes.md](../../decisions/0004-maxrows-bounds-total-changes.md).
+[../decisions/0004-maxrows-bounds-total-changes.md](../decisions/0004-maxrows-bounds-total-changes.md).
 
 The `write` permission has all of the controls above. `danger-raw-write` deliberately removes
 six of them: structured writes, the mandatory predicate, the mandatory `maxRows`, the
@@ -77,7 +79,7 @@ delete, maxRows 100, filter matches the wrong 50 rows  ->  committed, permanent
 The transaction protects against **breadth**. It does not protect against **wrongness**. The
 MVP has no restore tool, no scheduled backup and no automatic backup before a delete.
 `SECURITY.md` and the README must state this. See
-[../../decisions/0001-no-undo-in-mvp.md](../../decisions/0001-no-undo-in-mvp.md).
+[../decisions/0001-no-undo-in-mvp.md](../decisions/0001-no-undo-in-mvp.md).
 
 ## Attacker goals and blocks
 
@@ -124,7 +126,7 @@ Log fields for each operation:
 | Backup | `backupName`, `size`, `duration`, `outcome` |
 
 The `limitCheck` field states which check rejected a write, `precount` or `postexecution`.
-The agent does not receive that detail. See [error-model.md](../../mcp/error-model.md).
+The agent does not receive that detail. See [error-model.md](../mcp/error-model.md).
 
 The raw-write log has no table field, because one raw statement can touch several tables. The
 `sqlHash` value correlates repeated statements and it keeps no record of the data.
@@ -135,7 +137,7 @@ response. Use the backup name to correlate.
 ## Error responses as a leak surface
 
 Return a code from the small error model. Do not return a stack trace, a secret, a filesystem
-path or a SQLite internal message that names a file. See [error-model.md](../../mcp/error-model.md).
+path or a SQLite internal message that names a file. See [error-model.md](../mcp/error-model.md).
 
 ## Out of scope
 
@@ -149,13 +151,13 @@ The sidecar does not defend against these threats:
 - A network-volume attack. The request budget protects the database and the log, not the link. A
   volume attack needs a defence in front of the proxy.
 - One agent that uses the whole request budget and stops another agent. The budget has no partition,
-  because the deployment has one identity. See [../out-of-scope.md](../out-of-scope.md).
+  because the deployment has one identity. See [../plans/out-of-scope.md](../plans/out-of-scope.md).
 - A stolen token. There is no expiry and no revocation list. A rotation is a secret change and a
-  restart. See [platform-deployment.md](platform-deployment.md).
+  restart. See [../deployment/platforms.md](../deployment/platforms.md).
 - A network-mounted database file. NFS and SMB are outside the supported deployment model, because SQLite locking is unreliable there.
 
 ## Related
 
-- [security-model.md](security-model.md)
-- [sqlite-sandbox.md](../../database/sqlite-sandbox.md)
-- [../../database/structured-writes.md](../../database/structured-writes.md)
+- [model.md](model.md)
+- [sqlite-sandbox.md](../database/sqlite-sandbox.md)
+- [../database/structured-writes.md](../database/structured-writes.md)

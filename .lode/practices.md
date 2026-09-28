@@ -202,12 +202,12 @@ keep it that way.
 IL2026 and IL3050. The `RequestDelegate` overload does not:
 
 ```csharp
-app.MapGet("/health", static context =>
-{
-    context.Response.ContentType = "application/json";
-    return context.Response.WriteAsync("""{"status":"ok"}""");
-});
+app.MapGet("/example", static context => context.Response.WriteAsync("ok"));
 ```
+
+Prefer a framework endpoint over a hand-written one when the framework has the path. The health path
+is `app.MapHealthChecks(SidecarEndpoints.Health)`, which is AOT-clean and needs no handler. See
+[security/authentication.md](security/authentication.md).
 
 Prefer `CreateSlimBuilder`, explicit registrations and source-generated JSON. If a
 dependency makes AOT disproportionately hard, ship a self-contained .NET 10 Linux image

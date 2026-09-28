@@ -32,7 +32,9 @@ thus a path prefix cannot appear in a response. The 1.x SSE transport did send t
 [../mcp/tool-catalog.md](../mcp/tool-catalog.md).
 
 `/health` stays at the root. A platform probes the container directly and not through the proxy,
-thus a prefix on this path gives nothing and it adds one more way to break a probe.
+thus a prefix on this path gives nothing and it adds one more way to break a probe. The path is the
+framework health endpoint, `MapHealthChecks`, with an empty check set. See
+[authentication.md](authentication.md).
 
 ## The request budget
 

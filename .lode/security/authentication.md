@@ -92,16 +92,29 @@ cannot fill the log. See [public-endpoint.md](public-endpoint.md).
 
 ## Health endpoint
 
-```text
-GET /health      ->  200 {"status":"ok"}
+The framework health endpoint gives the path:
+
+```csharp
+builder.Services.AddHealthChecks();   // no check is registered
+app.MapHealthChecks(SidecarEndpoints.Health);
 ```
 
-It needs no token and it touches no database. A probe runs often, and an expensive probe becomes a
-denial-of-service vector against the owning application. `/health` is mapped without
-`RequireAuthorization()`; `/db/mcp` is mapped with it and with the request budget.
+```text
+GET /health      ->  200 Healthy      (text/plain)
+                     503 Unhealthy
+```
 
-The endpoint uses the `RequestDelegate` overload of `MapGet`. The `Delegate` overload reflects over
-the delegate signature, which the AOT analyzers report as IL2026 and IL3050.
+**Invariant.** No health check touches the database. The check set is empty, thus the endpoint
+reports the liveness of the process and nothing else. A probe runs every few seconds, and an
+expensive probe becomes a denial-of-service vector against the owning application. The checks that do
+need the database file run once, at startup. See
+[../configuration/options.md](../configuration/options.md).
+
+`/health` is mapped without `RequireAuthorization()` and without a rate-limit policy; `/db/mcp` is
+mapped with both. The framework endpoint builds no IL warning with the AOT analyzers on.
+
+A later phase may add a check, for example the backup worker of Phase 5. A new check must stay cheap
+and must not open a connection to the database.
 
 ## Network model
 

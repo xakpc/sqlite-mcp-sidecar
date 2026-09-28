@@ -33,6 +33,12 @@ builder.Services.AddSingleton<SqliteService>();
 builder.Services.AddSingleton<WriteBudget>();
 builder.Services.AddSingleton<WriteDeduplication>();
 
+// No check is registered on purpose, thus the endpoint reports the liveness of the process and
+// nothing else. A health check must not touch the database: a probe runs every few seconds, and an
+// expensive probe becomes a denial-of-service vector against the owning application. The checks that
+// do need the database file run once, at startup, in SidecarStartup.
+builder.Services.AddHealthChecks();
+
 builder.Services
     .AddAuthentication(DeploymentTokenDefaults.Scheme)
     .AddScheme<AuthenticationSchemeOptions, DeploymentTokenAuthenticationHandler>(
@@ -102,15 +108,7 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Process health only. It needs no token and it touches no database: a probe runs often, and an
-// expensive probe becomes a denial-of-service vector against the owning application.
-// The RequestDelegate overload, not the Delegate overload. The Delegate overload reflects over the
-// delegate signature, which the AOT analyzer reports as IL2026 and IL3050.
-app.MapGet(SidecarEndpoints.Health, static context =>
-{
-    context.Response.ContentType = "application/json";
-    return context.Response.WriteAsync("""{"status":"ok"}""");
-});
+app.MapHealthChecks(SidecarEndpoints.Health);
 
 // The whole public path, thus no proxy rewrites it. See SidecarEndpoints.
 app.MapMcp(SidecarEndpoints.Mcp)

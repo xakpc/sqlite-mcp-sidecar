@@ -48,7 +48,8 @@ public static class SidecarStartup
     /// </summary>
     private static void SweepStalePartialBackups(string backupDirectory, ILogger logger)
     {
-        foreach (var partial in Directory.EnumerateFiles(backupDirectory, "*.db.partial"))
+        // The suffix comes from BackupService, thus the sweep and the writer can never disagree.
+        foreach (var partial in Directory.EnumerateFiles(backupDirectory, "*.db" + BackupService.PartialSuffix))
         {
             try
             {

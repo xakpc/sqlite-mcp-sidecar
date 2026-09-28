@@ -29,12 +29,12 @@ The transaction protects breadth. It does not protect correctness.
 ## Consequences
 
 - `SECURITY.md` and the README must state that the sidecar has no undo, and that the operator must run backups.
-- The agent-facing guidance is to call `backup` first when a delete is not certain. That guidance needs `backup_status`, because an agent must be able to confirm that the copy succeeded.
+- The agent-facing guidance is to call `backup` first when a delete is not certain. That guidance needs a way to confirm the copy succeeded, which is why `backup` is a task-mode tool the agent polls. See [0007-tasks-over-a-status-tool.md](0007-tasks-over-a-status-tool.md).
 - `SQLITE_SIDECAR_BACKUP_BEFORE_DELETE` does not exist.
 - Delete recovery is the first candidate after the MVP.
 
 ## Related
 
 - [../database/structured-writes.md](../database/structured-writes.md)
-- [../plans/design/backups.md](../plans/design/backups.md)
+- [../database/backups.md](../database/backups.md)
 - [../plans/design/threat-model.md](../plans/design/threat-model.md)

@@ -22,8 +22,10 @@ connection, the write semaphore, the write authorizer policy, identifier validat
 model, the bounded pre-count, the row-limit rollback, the write budget and the idempotency cache.
 `maxRows` bounds every row that a write changes, a cascade and a trigger included.
 
-What is left is the operational half: backups and diagnostics (Phase 5), the optional
-`danger-raw-write` escape hatch (Phase 6), and the container and documentation (Phase 7).
+The operational half is done too. `backup` copies the live database with an incremental
+`sqlite3_backup_step` loop, so the owning application keeps writing, and it abandons itself after 50
+restarts. `diagnostics` reports a fixed value set. What is left is the optional `danger-raw-write`
+escape hatch (Phase 6) and the container and documentation (Phase 7).
 
 | Area | State |
 | --- | --- |
@@ -31,7 +33,7 @@ What is left is the operational half: backups and diagnostics (Phase 5), the opt
 | Authentication and the health endpoint | Implemented — [security/authentication.md](security/authentication.md) |
 | Public endpoint: paths and the request budget | Implemented — [security/public-endpoint.md](security/public-endpoint.md) |
 | Permissions and tool gating | Implemented — [security/permissions.md](security/permissions.md) |
-| MCP endpoint, `schema` and `query` | Implemented — [mcp/tool-catalog.md](mcp/tool-catalog.md) |
+| MCP endpoint and the tool catalog | Implemented — [mcp/tool-catalog.md](mcp/tool-catalog.md) |
 | Read-only connection | Implemented — [database/connections.md](database/connections.md) |
 | SQLite sandbox | Implemented — [database/sqlite-sandbox.md](database/sqlite-sandbox.md) |
 | TOON results and limits | Implemented — [mcp/query-results.md](mcp/query-results.md) |
@@ -41,7 +43,8 @@ What is left is the operational half: backups and diagnostics (Phase 5), the opt
 | `insert` and identifier validation | Implemented — [database/structured-writes.md](database/structured-writes.md) |
 | Write budget and write idempotency | Implemented — [security/write-controls.md](security/write-controls.md) |
 | `update`, `delete`, the filter model, the pre-count | Implemented — [database/structured-writes.md](database/structured-writes.md) |
-| Backup and diagnostics | Not started — Phase 5 |
+| Backup, the step loop and the restart cap | Implemented — [database/backups.md](database/backups.md) |
+| Diagnostics | Implemented — [database/diagnostics.md](database/diagnostics.md) |
 | `danger-raw-write` | Not started — Phase 6 |
 | Container and documentation | Not started — Phase 7 |
 | NativeAOT | Analyzers on. The publish attempt is Phase 8 |
@@ -71,7 +74,7 @@ src/Xakpc.SQLiteMCPSidecar/
     Properties/launchSettings.json # one profile for each deployment shape
     Configuration/                 SidecarOptions.cs, SidecarStartup.cs
     Database/                      SqliteService.cs, SqliteSecurity.cs, QueryResult.cs,
-                                   StructuredWriteBuilder.cs
+                                   StructuredWriteBuilder.cs, BackupService.cs
     Mcp/                           SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs
     Security/                      PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs,
                                    WriteBudget.cs, WriteDeduplication.cs
@@ -81,6 +84,7 @@ test/Xakpc.SQLiteMCPSidecar.Tests/
     StartupTests.cs, AuthTests.cs, PermissionGatingTests.cs, SchemaToolTests.cs
     SandboxBoundaryTests.cs, QueryToolTests.cs, RateLimitTests.cs
     InsertToolTests.cs, WriteIdempotencyTests.cs, WriteBudgetTests.cs
+    BackupToolTests.cs, DiagnosticsToolTests.cs
 sqlite-sidecar-mcp — Design Document.md
 ```
 
@@ -102,14 +106,15 @@ This split is the core product idea. Keep it visible in code and in documentatio
 permission applies to each table in the database. See
 [security/permissions.md](security/permissions.md).
 
-## Nine tools
+## Eight tools
 
 ```text
-schema   query   insert   update   delete
-backup   backup_status   diagnostics   execute_write_sql
+schema   query   insert   update   delete   backup   diagnostics
+execute_write_sql
 ```
 
-The five of the first line exist. The permission set decides which tools exist. See
+Every tool of the first line exists, and `backup` is the one task-mode tool: it answers with a task
+id and the client polls for the outcome. The permission set decides which tools exist. See
 [mcp/tool-catalog.md](mcp/tool-catalog.md).
 
 ## Context

@@ -16,11 +16,11 @@ catalog does not have yet, `execute_write_sql`.
 | `update`, `delete` | mandatory | Implemented |
 | `execute_write_sql` | mandatory | Phase 6 |
 | `query`, `schema`, `diagnostics` | not used | — |
-| `backup`, `backup_status` | not used | — |
+| `backup` | not used | — |
 
 Reads need no deduplication, because a repeated read changes nothing. `backup` needs none, because the
 filename carries a timestamp and a repeated backup costs disk space only. See
-[backups.md](backups.md).
+[../../database/backups.md](../../database/backups.md).
 
 `execute_write_sql` hashes the SQL text and the parameters in place of the table and the value map. The
 same rules apply: order the parameter keys, store a committed outcome only, and reject a repeated

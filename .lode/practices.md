@@ -30,7 +30,7 @@ src/Xakpc.SQLiteMCPSidecar/
     Program.cs
     Configuration/   SidecarOptions.cs, SidecarStartup.cs
     Database/        SqliteService.cs, SqliteSecurity.cs, QueryResult.cs,
-                     StructuredWriteBuilder.cs, and later BackupService.cs
+                     StructuredWriteBuilder.cs, BackupService.cs
     Mcp/             SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs
     Security/        PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs,
                      WriteBudget.cs, WriteDeduplication.cs
@@ -143,6 +143,7 @@ Add a package only when it removes a meaningful amount of code.
 | --- | --- | --- |
 | `Microsoft.Data.Sqlite` | 11.0.0-rc.1.26425.128 | ADO.NET provider and bundled native SQLite. |
 | `ModelContextProtocol.AspNetCore` | 2.2.0 | MCP server and Streamable HTTP transport. |
+| `ModelContextProtocol.Extensions.Tasks` | 2.2.0 | MCP Tasks. It carries the `backup` outcome and it removes a hand-written status tool. It pulls in the `ModelContextProtocol` meta package. |
 | `Toon.DotNet` | 4.1.1 | TOON serializer. Namespace is `ToonFormat`. The `DataTable` overload only. |
 
 Test project:
@@ -152,6 +153,7 @@ Test project:
 | `xunit.v3` | 4.0.1 | Test framework on Microsoft.Testing.Platform. |
 | `Microsoft.AspNetCore.Mvc.Testing` | 10.0.12 | `WebApplicationFactory` for the in-process target. |
 | `ModelContextProtocol.Core` | 2.2.0 | The MCP client: `HttpClientTransport`, `McpClient`. |
+| `ModelContextProtocol.Extensions.Tasks` | 2.2.0 | The client half of Tasks: `CallToolWithPollingAsync` for the `backup` tool. |
 
 Developer tools. A `scripts/*.cs` file-based app is not part of the shipped image, thus a package
 here has no effect on the sidecar or on NativeAOT:

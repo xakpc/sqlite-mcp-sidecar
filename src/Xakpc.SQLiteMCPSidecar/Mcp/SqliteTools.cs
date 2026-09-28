@@ -32,6 +32,7 @@ public sealed partial class SqliteTools(
     SqliteService database,
     WriteBudget writeBudget,
     WriteDeduplication deduplication,
+    BackupService backups,
     ILogger<SqliteTools> logger)
 {
     [McpServerTool(Name = "schema")]
@@ -303,6 +304,123 @@ public sealed partial class SqliteTools(
             token => database.DeleteAsync(table!, filter, limit, token),
             result => $"rowsAffected: {result.RowsAffected}\nrowsChanged: {result.RowsChanged}",
             cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The registered name of the backup tool. <c>Program</c> reads it to mark this one tool, and only
+    /// this one, as task-mode.
+    /// </summary>
+    public const string BackupToolName = "backup";
+
+    [McpServerTool(Name = BackupToolName, ReadOnly = true)]
+    [Description("Make a consistent copy of the database into the server's backup directory. "
+               + "The copy is safe to take while the application that owns the database keeps writing, "
+               + "and it never blocks that application for the length of the copy. "
+               + "This call answers immediately with a task and the copy continues in the background: "
+               + "poll the task to learn the outcome and the file name. "
+               + "You cannot choose where the file goes and you cannot read it back through this server; "
+               + "you give an optional label and the server builds the name. "
+               + "Only one backup runs at a time. "
+               + "Take a backup before a delete you are not sure about, because a delete cannot be undone.")]
+    [Authorize(Policy = "perm:backup")]
+    public async Task<CallToolResult> BackupAsync(
+        [Description("An optional short label for the file name, at most 40 characters, for example "
+                   + "'before-cleanup'. Letters, digits, dots, underscores and hyphens are kept and "
+                   + "anything else is removed. It is a label and NOT a path or a file name: the server "
+                   + "adds the database name and a UTC timestamp, so a repeated label never overwrites "
+                   + "an earlier backup.")]
+        string? label = null,
+        CancellationToken cancellationToken = default)
+    {
+        var started = TimeProvider.System.GetTimestamp();
+
+        // INVARIANT: a backup takes no request slot. It runs outside the request that started it and it
+        // lasts as long as the database is large, thus holding one of MAX_CONCURRENCY slots for that
+        // time would starve every read. The backup slot alone serialises it.
+        using var backupSlot = database.TryAcquireBackupSlot();
+        if (backupSlot is null)
+        {
+            LogCompleted(logger, BackupToolName, Elapsed(started), nameof(SidecarError.BackupFailed));
+            return SidecarErrors.Failure(
+                SidecarError.BackupFailed,
+                "A backup is already in progress. Wait for it to finish, then start another one.");
+        }
+
+        try
+        {
+            var result = await backups.RunAsync(label, cancellationToken).ConfigureAwait(false);
+            if (result.Outcome is BackupOutcome.AbandonedAfterRestarts)
+            {
+                LogCompleted(logger, BackupToolName, Elapsed(started), nameof(SidecarError.BackupFailed));
+                return SidecarErrors.Failure(
+                    SidecarError.BackupFailed,
+                    "The backup restarted too many times, because the database is written to faster than "
+                  + "it can be copied. Nothing was left behind. Retry when the database is quieter.");
+            }
+
+            LogCompleted(logger, BackupToolName, Elapsed(started), "ok");
+            return SidecarErrors.Success(
+                $"name: {result.FileName}\nbytes: {result.Bytes}\nrestarts: {result.Restarts}");
+        }
+        catch (OperationCanceledException)
+        {
+            // The sidecar is stopping. Nothing usable was left behind: BackupService removes the partial
+            // file on every abandon path.
+            LogCompleted(logger, BackupToolName, Elapsed(started), nameof(SidecarError.BackupFailed));
+            return SidecarErrors.Failure(
+                SidecarError.BackupFailed,
+                "The backup was stopped before it finished. Nothing was left behind. Start another one.");
+        }
+        catch (Exception exception)
+        {
+            // A SQLite message and a filesystem message both name paths, thus the detail reaches the log
+            // only and the agent gets fixed text.
+            LogFailed(logger, BackupToolName, nameof(SidecarError.BackupFailed), exception);
+            return SidecarErrors.Failure(
+                SidecarError.BackupFailed,
+                "The backup did not complete. The operator must check the sidecar log.");
+        }
+    }
+
+    [McpServerTool(Name = "diagnostics", ReadOnly = true)]
+    [Description("Report a small fixed set of health values for the database: the SQLite version, the "
+               + "journal mode, the page size, the page count and a quick integrity check. "
+               + "Page size multiplied by page count is the size of the database in bytes. "
+               + "A journal mode of 'wal' means a sidecar write does not block the readers of the owning "
+               + "application; any other mode means it does. "
+               + "A quick_check of 'ok' means no structural damage was found. "
+               + "The value set is fixed: this tool runs no query and takes no arguments.")]
+    [Authorize(Policy = "perm:diagnostics")]
+    public async Task<CallToolResult> DiagnosticsAsync(CancellationToken cancellationToken)
+    {
+        var started = TimeProvider.System.GetTimestamp();
+        using var slot = await database.AcquireRequestSlotAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var result = await database.ReadDiagnosticsAsync(cancellationToken).ConfigureAwait(false);
+            LogCompleted(logger, "diagnostics", Elapsed(started), "ok");
+            return SidecarErrors.Success(
+                $"sqliteVersion: {result.SqliteVersion}\n"
+              + $"journalMode: {result.JournalMode}\n"
+              + $"pageSize: {result.PageSize}\n"
+              + $"pageCount: {result.PageCount}\n"
+              + $"quickCheck: {result.QuickCheck}");
+        }
+        catch (OperationCanceledException)
+        {
+            // quick_check reads every page, thus a large database can reach the query timeout.
+            LogCompleted(logger, "diagnostics", Elapsed(started), nameof(SidecarError.QueryTimedOut));
+            return SidecarErrors.Failure(
+                SidecarError.QueryTimedOut,
+                "The integrity check passed the time limit and was stopped. The database is too large "
+              + "for this check at the configured timeout.");
+        }
+        catch (Exception exception)
+        {
+            LogFailed(logger, "diagnostics", nameof(SidecarError.DatabaseError), exception);
+            return SidecarErrors.Failure(SidecarError.DatabaseError, "The diagnostics could not be read.");
+        }
     }
 
     /// <summary>

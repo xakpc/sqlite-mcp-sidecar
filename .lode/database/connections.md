@@ -1,8 +1,8 @@
 # Connections
 
 The sidecar opens a connection with the least privilege that the operation needs. The read-only
-connection and the write connection have code. The backup connection arrives with its tool, and its
-design is in [../plans/design/connection-policy.md](../plans/design/connection-policy.md).
+connection, the write connection and the two backup connections all have code. The backup source and
+destination are in [backups.md](backups.md); this file covers the rest.
 
 Code: `src/Xakpc.SQLiteMCPSidecar/Database/SqliteService.cs`.
 
@@ -89,7 +89,7 @@ using var slot = await database.AcquireRequestSlotAsync(cancellationToken);
 | --- | --- | --- | --- |
 | Request | `MAX_CONCURRENCY`, 4 | Each MCP operation | Active |
 | Write | 1 | Structured and raw writes | Active |
-| Backup | 1 | The background backup | Phase 5 |
+| Backup | 1 | The background backup | Active, and it never waits |
 
 Three semaphores, and no scheduler framework.
 
@@ -122,6 +122,8 @@ writes it. See [../configuration/options.md](../configuration/options.md).
 
 ## Related
 
-- [../plans/design/connection-policy.md](../plans/design/connection-policy.md) — the write paths
+- [backups.md](backups.md) — the backup source and destination connections
+- [diagnostics.md](diagnostics.md)
+- [../plans/design/connection-policy.md](../plans/design/connection-policy.md) — what is still unbuilt
 - [sqlite-sandbox.md](sqlite-sandbox.md)
 - [../mcp/tool-catalog.md](../mcp/tool-catalog.md)

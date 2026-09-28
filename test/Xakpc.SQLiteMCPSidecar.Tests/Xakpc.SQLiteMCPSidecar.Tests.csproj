@@ -15,6 +15,8 @@
     <PackageReference Include="xunit.v3" Version="4.0.1" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
     <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
+    <!-- The client half of MCP Tasks: the backup tool is task-mode, thus a test polls for its result. -->
+    <PackageReference Include="ModelContextProtocol.Extensions.Tasks" Version="2.2.0" />
   </ItemGroup>
 
   <ItemGroup>

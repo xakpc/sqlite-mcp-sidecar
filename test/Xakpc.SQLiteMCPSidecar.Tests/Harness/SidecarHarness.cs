@@ -41,6 +41,27 @@ public abstract class SidecarHarness : IAsyncDisposable
     public virtual string? DatabasePath => null;
 
     /// <summary>
+    /// The backup directory of this sidecar, or <c>null</c> when the harness did not create it. A
+    /// test that asserts on backup files needs it.
+    /// </summary>
+    /// <remarks>
+    /// It is readable before the first <see cref="ConnectAsync"/>, because the harness creates the
+    /// directory in its constructor and the host starts lazily. A test that must place a file before
+    /// startup reads it, writes the file and connects after that.
+    /// </remarks>
+    public virtual string? BackupDirectory => null;
+
+    /// <summary>
+    /// The service provider of the sidecar under test, or <c>null</c> for an external target.
+    /// </summary>
+    /// <remarks>
+    /// It exists for the few invariants that a remote call cannot set up, for example holding the
+    /// backup slot to prove that a second backup is refused. Prefer a test that goes through the MCP
+    /// client: this reaches inside the process and the external target cannot offer it.
+    /// </remarks>
+    public virtual IServiceProvider? Services => null;
+
+    /// <summary>
     /// Starts a sidecar with the given permission set.
     /// </summary>
     /// <param name="permissions">The deployment permission specification.</param>
@@ -150,6 +171,10 @@ public sealed class InProcessSidecarHarness : SidecarHarness
     public override string Permissions { get; }
 
     public override string DatabasePath => _database.Path;
+
+    public override string BackupDirectory => _database.BackupDirectory;
+
+    public override IServiceProvider Services => _factory.Services;
 
     public override HttpClient CreateHttpClient() => _factory.CreateClient();
 

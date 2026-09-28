@@ -15,6 +15,19 @@ namespace Xakpc.SQLiteMCPSidecar.Database;
 /// </param>
 public sealed record StructuredWriteResult(int RowsAffected, long RowId, int RowsChanged);
 
+/// <summary>The fixed diagnostic value set. Read-only, and never extended with a caller-chosen pragma.</summary>
+/// <param name="SqliteVersion">The SQLite library version of this sidecar, not of the owning application.</param>
+/// <param name="JournalMode">The journal mode of the database file. The owning application owns this setting.</param>
+/// <param name="PageSize">The page size in bytes.</param>
+/// <param name="PageCount">The number of pages. PageSize * PageCount is the database size.</param>
+/// <param name="QuickCheck">The <c>PRAGMA quick_check</c> result. <c>ok</c> means no structural damage was found.</param>
+public sealed record DiagnosticsResult(
+    string SqliteVersion,
+    string JournalMode,
+    long PageSize,
+    long PageCount,
+    string QuickCheck);
+
 /// <summary>
 /// Opens connections to the one database of the deployment and runs the server-authored
 /// statements. The sidecar opens a connection with the least privilege that the operation needs.
@@ -24,17 +37,19 @@ public sealed class SqliteService : IDisposable
     private readonly SidecarOptions _options;
     private readonly SemaphoreSlim _requestSlots;
     private readonly SemaphoreSlim _writeSlot;
+    private readonly SemaphoreSlim _backupSlot;
 
     public SqliteService(SidecarOptions options)
     {
         _options = options;
         _requestSlots = new SemaphoreSlim(options.MaxConcurrency, options.MaxConcurrency);
         _writeSlot = new SemaphoreSlim(1, 1);
+        _backupSlot = new SemaphoreSlim(1, 1);
     }
 
     /// <summary>
-    /// Bounds the number of concurrent MCP operations. The backup semaphore arrives with the backup
-    /// tool.
+    /// Bounds the number of concurrent MCP operations. A backup does not take one: it runs outside the
+    /// request that started it. See <see cref="TryAcquireBackupSlot"/>.
     /// </summary>
     public async ValueTask<IDisposable> AcquireRequestSlotAsync(CancellationToken cancellationToken)
     {
@@ -480,10 +495,127 @@ public sealed class SqliteService : IDisposable
         return builder.ToString();
     }
 
+
+    /// <summary>
+    /// Takes the one backup slot, or returns <c>null</c> when a backup already runs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Invariant.</b> The wait is zero. This is the one semaphore of the three that never waits,
+    /// and it must not copy the bounded wait of <see cref="TryAcquireWriteSlotAsync"/>. A backup runs
+    /// for as long as the database is large, thus a waiting caller would hold a connection for the
+    /// whole copy. A second request is answered at once with <c>BackupFailed</c>.
+    /// </para>
+    /// <para>
+    /// Do not queue the second request either. A queue lets an agent plan unbounded disk use, and this
+    /// product has no scheduler.
+    /// </para>
+    /// </remarks>
+    public IDisposable? TryAcquireBackupSlot() =>
+        _backupSlot.Wait(0) ? new Slot(_backupSlot) : null;
+
+    /// <summary>
+    /// The connection string of a backup destination. The path is server-built and never comes from a
+    /// caller.
+    /// </summary>
+    /// <remarks>
+    /// <c>ReadWriteCreate</c> is correct here and it is the one place in the sidecar that creates a
+    /// file: the destination of a backup does not exist yet. The rule that the live database is never
+    /// created is about <see cref="ReadWriteConnectionString"/>, which stays <c>ReadWrite</c>.
+    /// </remarks>
+    public static string BackupDestinationConnectionString(string partialPath) =>
+        new SqliteConnectionStringBuilder
+        {
+            DataSource = partialPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false,
+        }.ConnectionString;
+
+    /// <summary>
+    /// Opens the destination of a backup. The sandbox baseline does not apply: no caller SQL ever
+    /// reaches this handle, and the only writer is the Online Backup API itself.
+    /// </summary>
+    public static async Task<SqliteConnection> OpenBackupDestinationAsync(
+        string partialPath,
+        CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection(BackupDestinationConnectionString(partialPath));
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Reads the fixed diagnostic value set over a read-only connection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Invariant.</b> The value set is fixed and the statements are server-authored. Never accept a
+    /// caller-supplied <c>PRAGMA</c> name: a caller-chosen pragma is a write primitive and an
+    /// information leak.
+    /// </para>
+    /// <para>
+    /// <c>quick_check</c> and not <c>integrity_check</c>. <c>quick_check</c> does not verify index
+    /// content, thus it does not stall the owning application. It still reads every page, thus the
+    /// query timeout and the interrupt bound it: a large database must not hang the tool.
+    /// </para>
+    /// </remarks>
+    public async Task<DiagnosticsResult> ReadDiagnosticsAsync(CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(_options.QueryTimeoutSeconds));
+        var token = timeout.Token;
+
+        await using var connection = await OpenReadOnlyAsync(token).ConfigureAwait(false);
+        using var interrupt = SqliteSecurity.RegisterInterrupt(connection, token);
+
+        // No authorizer is installed. Every policy denies PRAGMA, and these statements are the
+        // server's own. This is the same shape as ReadJournalModeAsync.
+        var version = await ReadScalarAsync(connection, "SELECT sqlite_version();", token).ConfigureAwait(false);
+        var journalMode = await ReadScalarAsync(connection, "PRAGMA journal_mode;", token).ConfigureAwait(false);
+        var pageSize = await ReadScalarAsync(connection, "PRAGMA page_size;", token).ConfigureAwait(false);
+        var pageCount = await ReadScalarAsync(connection, "PRAGMA page_count;", token).ConfigureAwait(false);
+        var quickCheck = await ReadScalarAsync(connection, "PRAGMA quick_check;", token).ConfigureAwait(false);
+
+        return new DiagnosticsResult(
+            version ?? "unknown",
+            journalMode ?? "unknown",
+            ParseLong(pageSize),
+            ParseLong(pageCount),
+            quickCheck ?? "unknown");
+    }
+
+    private static async Task<string?> ReadScalarAsync(
+        SqliteConnection connection,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return value switch
+        {
+            null or DBNull => null,
+            string text => text,
+            _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture),
+        };
+    }
+
+    private static long ParseLong(string? value) =>
+        long.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
+
     public void Dispose()
     {
         _requestSlots.Dispose();
         _writeSlot.Dispose();
+        _backupSlot.Dispose();
     }
 
     private sealed class Slot(SemaphoreSlim semaphore) : IDisposable

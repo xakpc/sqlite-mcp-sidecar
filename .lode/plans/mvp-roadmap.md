@@ -6,7 +6,7 @@ decisions are in [open-questions.md](open-questions.md).
 
 ## Current state
 
-Phase 0 to Phase 4b are done. Phase 2 and Phase 3 shipped together. See
+Phase 0 to Phase 5 are done. Phase 2 and Phase 3 shipped together. See
 [../summary.md](../summary.md) for the status table.
 
 ## Sequence
@@ -17,7 +17,7 @@ flowchart TD
     p1 --> p23[Phase 2+3: sandbox, query and TOON — done]
     p23 --> p4a[Phase 4a: the write path and insert — done]
     p4a --> p4b[Phase 4b: the filter, update and delete — done]
-    p4b --> p5[Phase 5: backup and diagnostics]
+    p4b --> p5[Phase 5: backup and diagnostics — done]
     p5 --> p6[Phase 6: danger-raw-write]
     p6 --> p7[Phase 7: container and docs]
     p7 --> p8[Phase 8: NativeAOT attempt]
@@ -81,7 +81,7 @@ codebase holds no uncalled code:
 | --- | --- |
 | The read-write connection factory | 4a |
 | The write semaphore | 4a |
-| The backup semaphore | 5 |
+| The backup semaphore | 5, done |
 | The write and DML authorizer policies | 4a and 6 |
 
 Their design stays in [design/connection-policy.md](design/connection-policy.md).
@@ -124,18 +124,38 @@ codebase holds no uncalled code.
 thus a `delete` with `maxRows = 1` would pass both checks and still destroy a whole cascade subtree.
 The limit counts `sqlite3_total_changes`, and that also made the post-execution branch testable.
 
-### Phase 5 — backup and diagnostics
+### Phase 5 — backup and diagnostics. Done
 
-- `Database/BackupService.cs` on the Online Backup API, with a read-only source connection.
-- The background copy, the partial file and the rename after success.
-- The startup sweep of stale partial files.
-- The runaway cap, and the interrupt test. See [design/backups.md](design/backups.md).
-- `backup` and `backup_status`.
-- Label sanitization and path containment.
-- `diagnostics` with the fixed value set and `PRAGMA quick_check`.
+Current state: [../database/backups.md](../database/backups.md),
+[../database/diagnostics.md](../database/diagnostics.md),
+[../decisions/0006-backup-restart-cap.md](../decisions/0006-backup-restart-cap.md),
+[../decisions/0007-tasks-over-a-status-tool.md](../decisions/0007-tasks-over-a-status-tool.md).
 
-Done when: a backup succeeds while the owning application runs, a caller cannot influence the
-destination path, and a stopped backup leaves no file without the partial suffix.
+`Database/BackupService.cs` holds the step loop, the restart cap, the partial file and the label
+rules. `backup` is task-mode, `diagnostics` reports the fixed value set, and `SidecarStartup` sweeps
+stale partials.
+
+A backup succeeds while the owning application writes, a caller cannot influence the destination
+path, and every abandon path removes the partial file.
+
+**Two decisions changed the drafted plan**, and both came from primary sources rather than from
+preference:
+
+- `SqliteConnection.BackupDatabase` is one `sqlite3_backup_step(backup, -1)` call, and a step holds a shared lock on the source for its whole duration. It would block the owning application for the length of the copy, so the copy is an incremental loop instead.
+- `sqlite3_backup_step` does not document `SQLITE_INTERRUPT`, thus the drafted interrupt test was unwritable. The loop checks a token between steps, which needs no test to justify.
+
+**The cap counts restarts, not the drafted 10 minutes.** A deadline cannot tell a livelock from a
+large database. See [../decisions/0006-backup-restart-cap.md](../decisions/0006-backup-restart-cap.md).
+
+**There is no `backup_status`.** MCP Tasks carries the outcome, so the catalog is eight tools. See
+[../decisions/0007-tasks-over-a-status-tool.md](../decisions/0007-tasks-over-a-status-tool.md).
+
+**Lesson, and it was a silent one.** `Fixtures/sample-db.sql` sets `PRAGMA journal_mode = WAL` and the
+fixture applied the requested mode *before* running the script, thus the `journalMode` argument did
+nothing and every rollback-journal test ran against a WAL database. `DiagnosticsToolTests` exposed it,
+because it is the first test that asserts the reported mode. The fixture now applies the mode after
+the script and throws when SQLite reports a different one. A test that asserts nothing observable can
+pass for years.
 
 ### Phase 6 — danger-raw-write
 

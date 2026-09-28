@@ -75,10 +75,14 @@ documentation.
 
 ## Backups
 
-- **background backup** — the copy that the `backup` tool starts. The tool call does not wait for it.
+- **background backup** — the copy that the `backup` tool starts. The tool call answers with a task and does not wait for it.
 - **partial backup** — a file with the `*.db.partial` suffix. It is an incomplete copy. The sidecar renames it only after success.
-- **runaway cap** — the hardcoded 10-minute limit on one background backup.
-- **backup ring** — the small in-memory list of recent backup outcomes that `backup_status` reports.
+- **step loop** — the loop of `sqlite3_backup_step(backup, 256)` calls that makes one backup. It releases the source lock between steps, thus the owning application keeps writing.
+- **restart** — the copy starting again from the first page because the source changed. A rising `sqlite3_backup_remaining` is the signal.
+- **runaway cap** — the hardcoded limit of 50 restarts on one background backup. It counts restarts and not seconds.
+- **label** — the short caller-supplied string that the server sanitizes into a backup file name. It is never a path.
+- **task-mode tool** — a tool that answers with a task id instead of a result. `backup` is the only one.
+- **execution mode selector** — the delegate that gives each tool its `McpTaskExecutionMode`. It pins every tool except `backup` to `Synchronous`.
 
 ## Results
 
@@ -95,5 +99,7 @@ documentation.
 - Testing detail: [testing/e2e-harness.md](testing/e2e-harness.md)
 - Sandbox detail: [database/sqlite-sandbox.md](database/sqlite-sandbox.md)
 - Idempotency detail: [security/write-controls.md](security/write-controls.md)
+- Backup detail: [database/backups.md](database/backups.md)
+- Diagnostics detail: [database/diagnostics.md](database/diagnostics.md)
 - Structured write detail: [database/structured-writes.md](database/structured-writes.md)
 - Result format detail: [mcp/query-results.md](mcp/query-results.md)

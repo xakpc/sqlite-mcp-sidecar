@@ -14,6 +14,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0-rc.1.26425.128" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <!-- MCP Tasks: the backup tool answers with a task id and the client polls for the outcome. -->
+    <PackageReference Include="ModelContextProtocol.Extensions.Tasks" Version="2.2.0" />
     <!-- Used by the result pipeline from Phase 3 onward. -->
     <PackageReference Include="Toon.DotNet" Version="4.1.1" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.24.2-preview.1" />

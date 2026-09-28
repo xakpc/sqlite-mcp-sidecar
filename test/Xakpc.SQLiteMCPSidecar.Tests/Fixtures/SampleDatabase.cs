@@ -50,16 +50,26 @@ public static class SampleDatabase
 
         connection.Open();
 
-        using (var pragma = connection.CreateCommand())
+        using (var command = connection.CreateCommand())
         {
-            pragma.CommandText = $"PRAGMA journal_mode = {journalMode};";
-            pragma.ExecuteScalar();
+            command.CommandText = Script;
+            command.ExecuteNonQuery();
         }
 
-        using var command = connection.CreateCommand();
-        // The script's own journal_mode line is harmless: the pragma above already decided it.
-        command.CommandText = Script;
-        command.ExecuteNonQuery();
+        // AFTER the script, and not before it. The script carries its own `PRAGMA journal_mode = WAL`
+        // line, thus a mode set before it is overwritten and the journalMode argument does nothing. That
+        // defect made every rollback-journal test run against a WAL database and pass for the wrong
+        // reason.
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText = $"PRAGMA journal_mode = {journalMode};";
+        var applied = pragma.ExecuteScalar() as string;
+
+        if (!string.Equals(applied, journalMode, StringComparison.OrdinalIgnoreCase))
+        {
+            // A silent fallback here would recreate the same class of defect.
+            throw new InvalidOperationException(
+                $"The sample database asked for journal mode '{journalMode}' and SQLite reported '{applied}'.");
+        }
     }
 
     /// <summary>

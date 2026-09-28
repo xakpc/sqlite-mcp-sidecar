@@ -19,8 +19,9 @@ flowchart TD
     root --> dec[decisions/]
     root --> plans[plans/]
     root --> tmp[tmp/ — git-ignored]
-    dbd --> dbs[connections.md, sqlite-sandbox.md, structured-writes.md]
-    mcpd --> mcps[tool-catalog.md, query-results.md, error-model.md]
+    dbd --> dbs[connections.md, sqlite-sandbox.md, structured-writes.md, backups.md, diagnostics.md]
+    mcpd --> mcps[tool-catalog.md, query-results.md, error-model.md, schema-output.md,
+                   write-tool-arguments.md]
     plans --> rm[mvp-roadmap.md]
     plans --> rt[required-tests.md]
     plans --> oq[open-questions.md]
@@ -63,14 +64,18 @@ moves out of `plans/design/` when code implements it, and it is rewritten as cur
 | [database/connections.md](database/connections.md) | The read-only connection, the write connection and `ForeignKeys`, `query_only`, pooling off, where the sandbox applies, the request and write semaphores, the filesystem constraints. |
 | [database/sqlite-sandbox.md](database/sqlite-sandbox.md) | The always-on SQLite controls, the verified native API, the two allowlist policies, runtime limits, the one-statement rule, hard boundaries, cancellation. |
 | [database/structured-writes.md](database/structured-writes.md) | Why the server builds the statement, the three tools, the flat filter model, the order of an insert and of a mutation, the two row-limit checks, identifier validation, the value table, the result shapes. |
+| [database/backups.md](database/backups.md) | The task-mode call, the step loop and why it is not `BackupDatabase`, restarts and the restart cap with measured numbers, partial files, path safety, the backup slot. |
+| [database/diagnostics.md](database/diagnostics.md) | The fixed value set, why the journal mode matters most, `quick_check` over `integrity_check`, the connection. |
 
 ## mcp/
 
 | File | Contents |
 | --- | --- |
-| [mcp/tool-catalog.md](mcp/tool-catalog.md) | The nine tools and which exist, server registration, the stateless transport and the removed handshake, tool shape, the mandatory-argument lesson, `schema`, `query`, `insert`. |
+| [mcp/tool-catalog.md](mcp/tool-catalog.md) | The eight tools and which exist, server registration, the one task-mode tool and the execution mode selector, the stateless transport and the removed handshake, tool shape. |
 | [mcp/query-results.md](mcp/query-results.md) | The result pipeline, the `Toon.DotNet` serializer, output format, value handling, row and byte limits, truncation. |
 | [mcp/error-model.md](mcp/error-model.md) | The twelve codes, how a code reaches the agent, which reach a caller today, a selection flowchart, disclosure rules. |
+| [mcp/schema-output.md](mcp/schema-output.md) | Why `schema` returns DDL and not TOON, what is hidden, the one open verification task. |
+| [mcp/write-tool-arguments.md](mcp/write-tool-arguments.md) | The write tool signatures, the mandatory-argument `= null` lesson, why the JSON schema marks nothing required, the shared write path. |
 
 ## testing/
 
@@ -90,6 +95,8 @@ trade-off.
 | [decisions/0003-mandatory-idempotency-key.md](decisions/0003-mandatory-idempotency-key.md) | Each write tool needs `requestId`. Why failures are not cached. |
 | [decisions/0004-maxrows-bounds-total-changes.md](decisions/0004-maxrows-bounds-total-changes.md) | `maxRows` counts a cascade and a trigger, not the target table alone. Why `ExecuteNonQuery` is the wrong count. |
 | [decisions/0005-and-only-filter.md](decisions/0005-and-only-filter.md) | The structured filter joins with `AND` only. Why N calls bound tighter than one `or`. |
+| [decisions/0006-backup-restart-cap.md](decisions/0006-backup-restart-cap.md) | The backup cap counts restarts, not seconds. The measured write rates. |
+| [decisions/0007-tasks-over-a-status-tool.md](decisions/0007-tasks-over-a-status-tool.md) | MCP Tasks replaced `backup_status`. Why the execution mode selector is load-bearing. |
 
 ## plans/
 
@@ -108,10 +115,9 @@ Target design for what has no code. One topic for each file.
 | --- | --- |
 | [security-model.md](plans/design/security-model.md) | The layered security model, the guarantees list, the non-guarantees list. Start here. |
 | [threat-model.md](plans/design/threat-model.md) | Agent mistakes, mitigation map, the mistake that the MVP does not mitigate, attacker goals and blocks, logging and errors as leak surfaces. |
-| [connection-policy.md](plans/design/connection-policy.md) | The backup connections and the backup semaphore. Everything else is current state. |
+| [connection-policy.md](plans/design/connection-policy.md) | One row left: the `execute_write_sql` connection. Everything else is current state. |
 | [write-idempotency.md](plans/design/write-idempotency.md) | Only the scope table: which tools take `requestId`. The rest is current state. |
 | [raw-writes.md](plans/design/raw-writes.md) | `execute_write_sql`, what the permission bypasses and what it does not, results, budget accounting, no remote transactions. |
-| [backups.md](plans/design/backups.md) | The background backup, partial files, the runaway cap, `backup_status`, path safety, and the `diagnostics` tool. |
 | [container-and-deployment.md](plans/design/container-and-deployment.md) | Deployment shape, compose example, filesystem access, image hardening, current Dockerfile gaps, build output. |
 | [platform-deployment.md](plans/design/platform-deployment.md) | Kamal and Coolify recipes, the proxy path options, the healthcheck path, replicas, the client header, token rotation. |
 
@@ -127,7 +133,8 @@ documents go here.
 | Start a session | `lode-map.md`, `terminology.md`, `summary.md` |
 | Continue implementation | `plans/mvp-roadmap.md`, `practices.md` |
 | Write or run a test | `testing/e2e-harness.md`, `plans/required-tests.md` |
-| Touch SQLite access | `database/sqlite-sandbox.md`, `database/connections.md`, `plans/design/connection-policy.md` |
+| Touch SQLite access | `database/sqlite-sandbox.md`, `database/connections.md` |
+| Touch a backup | `database/backups.md`, `decisions/0006-backup-restart-cap.md`, `decisions/0007-tasks-over-a-status-tool.md` |
 | Add or change a tool | `mcp/tool-catalog.md`, `security/permissions.md`, `mcp/error-model.md` |
 | Touch authentication | `security/authentication.md`, `security/permissions.md` |
 | Touch an endpoint, a path or a rate limit | `security/public-endpoint.md`, `plans/design/platform-deployment.md` |

@@ -81,7 +81,7 @@ A read-only root filesystem needs a writable temporary directory. SQLite can nee
 space for a large sort or a spill. Mount a small `tmpfs` and point `SQLITE_TMPDIR` at it.
 
 The process deletes stale `*.db.partial` files in the backup directory at startup. A file with
-that suffix is an incomplete backup from a process that stopped. See [backups.md](backups.md).
+that suffix is an incomplete backup from a process that stopped. See [../../database/backups.md](../../database/backups.md).
 
 ## Image requirements
 

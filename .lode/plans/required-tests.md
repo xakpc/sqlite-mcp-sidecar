@@ -150,6 +150,40 @@ unchanged, a JSON null becomes a SQLite NULL, and the response carries the new r
 `is-null` matches an absent value, a replay returns the identical response, and a cascade over the
 limit rolls back.
 
+The backup and diagnostics lists are complete, in `BackupToolTests` and `DiagnosticsToolTests`:
+
+```text
+tools/call backup answers with a task and not a result    done
+one complete file, and no partial survives                done
+the file is a usable database, integrity_check is ok       done
+the name is built from the label and a UTC timestamp       done
+a repeated label does not overwrite the earlier backup      done
+a label with a separator or .. is never a path             done
+a label of only rejected characters -> BackupFailed        done
+a second backup during a backup -> BackupFailed            done
+the backup slot never waits, and it is released            done
+startup deletes a stale partial file                       done
+backup is absent without the permission                    done
+
+the whole fixed diagnostics value set                      done
+a rollback-journal database reports its mode               done
+a plausible page size and page count                       done
+no path and no row data in the output                      done
+diagnostics exposes no argument at all                     done
+diagnostics is absent without the permission               done
+```
+
+**The path cases assert on the produced name, not on a rejection.** `Sanitize` strips a separator
+rather than refusing the label, thus `../escape` gives `escape.db` inside the backup directory. The
+test also asserts that nothing appeared outside it. Only a label with no permitted character at all is
+`BackupFailed`.
+
+**`ASecondBackupDuringABackupFails` holds the backup slot from the test** through
+`harness.Services`. A genuine second call would race the first, because the sample database copies in
+milliseconds. The restart cap itself was proven by hand against a 17 MiB database under continuous
+write, which abandoned after 50 restarts in 823 ms. See
+[../decisions/0006-backup-restart-cap.md](../decisions/0006-backup-restart-cap.md).
+
 Each remaining item belongs to its phase:
 
 ```text
@@ -158,24 +192,21 @@ raw UPDATE
 raw DELETE
 raw UPDATE RETURNING
 
-backup returns before the copy completes
-backup_status reports success
-backup_status reports failure
-a second backup during a backup -> BackupFailed
-a stopped backup leaves only a partial file
-startup deletes a stale partial file
-
 read-only deployment
 structured-write deployment
 danger-raw-write deployment
-
-WAL database
-rollback-journal database
 
 SQLITE_BUSY behavior
 query timeout
 concurrency limiting
 ```
+
+**A WAL database and a rollback-journal database are both covered now.** They were not before:
+`sample-db.sql` sets `PRAGMA journal_mode = WAL`, and the fixture applied the requested mode before
+running the script, thus the `journalMode` argument did nothing and every rollback-journal test ran
+against a WAL database. `SampleDatabase.CreateAt` now applies the mode after the script and throws
+when SQLite reports a different one. `DiagnosticsToolTests.DiagnosticsReportsARollbackJournalDatabase`
+is what exposed it, because it is the first test that asserts the reported mode.
 
 Run the functional suite against the published Linux artifact. The sandbox depends on the
 native SQLite build, thus a Windows developer run does not prove the shipped behavior.

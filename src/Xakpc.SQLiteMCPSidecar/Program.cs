@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.RateLimiting;
 using ModelContextProtocol.AspNetCore;
+using ModelContextProtocol.Extensions.Tasks;
 using Xakpc.SQLiteMCPSidecar.Configuration;
 using Xakpc.SQLiteMCPSidecar.Database;
 using Xakpc.SQLiteMCPSidecar.Mcp;
@@ -32,6 +33,10 @@ builder.Services.AddSingleton<SqliteService>();
 // restart and two processes do not share them. That is why one sidecar serves one database.
 builder.Services.AddSingleton<WriteBudget>();
 builder.Services.AddSingleton<WriteDeduplication>();
+
+// Holds no state between backups. It is a singleton because the backup slot that serialises it lives
+// in SqliteService, which is one too.
+builder.Services.AddSingleton<BackupService>();
 
 // No check is registered on purpose, thus the endpoint reports the liveness of the process and
 // nothing else. A health check must not touch the database: a probe runs every few seconds, and an
@@ -92,6 +97,25 @@ builder.Services
     // Honours [Authorize] on every tool: it removes an unauthorized tool from tools/list and
     // rejects a direct tools/call of that name.
     .AddAuthorizationFilters()
+    // MCP Tasks gives backup the "call now, fetch later" shape. A backup is the longest operation in
+    // the product and no caller can hold an HTTP connection for it: a reverse proxy closes such a
+    // connection first, and the client then reads a gateway timeout while the backup continues and
+    // succeeds. The protocol carries the polling mechanism, thus the sidecar needs no status tool.
+    //
+    // The task store is process memory, thus it carries the same caveat as WriteBudget and
+    // WriteDeduplication: it resets at a restart and two processes do not share it. That makes the
+    // one-sidecar rule stronger, not weaker.
+    .WithTasks(new InMemoryMcpTaskStore(), tasks =>
+        // INVARIANT: backup is the only task-mode tool. Every other tool stays Synchronous, thus the
+        // agent-visible contract of schema, query, insert, update and delete does not change at all.
+        // Without this selector the default for an async tool is Optional, which would give every tool
+        // a second calling convention and a second result shape. That is an unwanted surface change on
+        // a security boundary: the error model owns every failure an agent can cause, and a second
+        // shape would route some of them past it.
+        tasks.ExecutionModeSelector = request =>
+            string.Equals(request.Params?.Name, SqliteTools.BackupToolName, StringComparison.Ordinal)
+                ? McpTaskExecutionMode.Required
+                : McpTaskExecutionMode.Synchronous)
     // Explicit registration. Assembly scanning is annotated RequiresUnreferencedCode, which blocks
     // NativeAOT, and it would remove permission control of the exposed surface.
     .WithTools<SqliteTools>();

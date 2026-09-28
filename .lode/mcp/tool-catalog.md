@@ -1,7 +1,7 @@
 # MCP tool catalog
 
-The sidecar has one MCP endpoint at `/db/mcp` over Streamable HTTP. The catalog has nine tools at
-most, and five of them exist. The path is the whole public path on purpose. See
+The sidecar has one MCP endpoint at `/db/mcp` over Streamable HTTP. The catalog has eight tools at
+most, and seven of them exist. The path is the whole public path on purpose. See
 [../security/public-endpoint.md](../security/public-endpoint.md).
 
 Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidecar/Program.cs`.
@@ -13,14 +13,15 @@ Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidec
 | `insert` | `write` | no | mandatory | **Implemented** |
 | `update` | `write` | no | mandatory | **Implemented** |
 | `delete` | `write` | no | mandatory | **Implemented** |
-| `backup` | `backup` | no | no | Phase 5 |
-| `backup_status` | `backup` | no | no | Phase 5 |
-| `diagnostics` | `diagnostics` | no | no | Phase 5 |
+| `backup` | `backup` | no | no | **Implemented**, task-mode |
+| `diagnostics` | `diagnostics` | no | no | **Implemented** |
 | `execute_write_sql` | `danger-raw-write` | yes, DML | mandatory | Phase 6 |
 
 A permission that has no tool yet exposes nothing.
 `PermissionGatingTests.OnlyTheImplementedToolsAreExposed` starts a deployment with every permission
-and asserts that `tools/list` holds `schema`, `query`, `insert`, `update` and `delete` only.
+and asserts that `tools/list` holds `schema`, `query`, `insert`, `update`, `delete`, `backup` and
+`diagnostics` only. `backup_status` must never appear: MCP Tasks carries the backup outcome. See
+[../decisions/0007-tasks-over-a-status-tool.md](../decisions/0007-tasks-over-a-status-tool.md).
 
 Adding a tool needs no name list anywhere. `AddAuthorizationFilters()` reads the `[Authorize]`
 attribute on the method, and that one attribute gives both gating layers.
@@ -32,6 +33,11 @@ builder.Services
     .AddMcpServer()
     .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
     .AddAuthorizationFilters()
+    .WithTasks(new InMemoryMcpTaskStore(), tasks =>
+        tasks.ExecutionModeSelector = request =>
+            string.Equals(request.Params?.Name, SqliteTools.BackupToolName, StringComparison.Ordinal)
+                ? McpTaskExecutionMode.Required
+                : McpTaskExecutionMode.Synchronous)
     .WithTools<SqliteTools>();
 
 app.MapMcp(SidecarEndpoints.Mcp)
@@ -45,6 +51,36 @@ blocks NativeAOT, and it removes control of the exposed surface.
 `AddAuthorizationFilters()` must be present. It is what makes the `[Authorize]` attribute on a tool
 effective, in `tools/list` and in `tools/call`. See
 [../security/permissions.md](../security/permissions.md).
+
+## One task-mode tool
+
+`backup` answers with a task and the client polls for the result. Every other tool answers inline.
+
+**Invariant. The `ExecutionModeSelector` pins every tool except `backup` to `Synchronous`.** The
+default for an async tool is `Optional`, and every tool here is `async Task<CallToolResult>`, thus
+registering a task store without the selector would give the whole catalog a second calling
+convention and a second result shape. The error model must own every failure an agent can cause, and
+a second shape routes some of them past it.
+
+`backup` is `Required` and not `Optional`, thus a client that does not implement the extension cannot
+call it at all:
+
+```text
+{"error":{"code":-32021,
+  "message":"The request requires the 'io.modelcontextprotocol/tasks' client extension capability.",
+  "data":{"requiredCapabilities":{"extensions":{"io.modelcontextprotocol/tasks":{}}}}}}
+```
+
+That is the intended behaviour. `Optional` would let such a client fall back to an inline call, which
+a reverse proxy cuts at its read timeout. See
+[../decisions/0007-tasks-over-a-status-tool.md](../decisions/0007-tasks-over-a-status-tool.md).
+
+A test calls it through `McpTasksClientExtensions`: `CallToolAsTaskAsync` to assert the shape, or
+`CallToolWithPollingAsync` to get the finished result. `CallToolAsync` does not work on `backup`.
+
+**Lesson.** The v1 documentation page for Tasks describes an API absent from 2.2.0 —
+`McpServerOptions` has no `TaskStore` property and `McpServerToolCreateOptions` has no `Execution`
+property. The v2 page is the correct one. Reflect over the shipped assembly before believing a page.
 
 ## The transport is stateless
 
@@ -86,38 +122,9 @@ goes to the log. A tool logs the name, the duration and the outcome through a so
 
 ## `schema`
 
-```sql
-SELECT sql FROM sqlite_master
-WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'
-ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'view' THEN 1 WHEN 'index' THEN 2 ELSE 3 END, name;
-```
-
-The statement is server-authored and takes no caller input, thus the tool needs no sandbox and it
-has no parameter. It runs over a read-only connection. See
-[../database/connections.md](../database/connections.md).
-
-```text
-CREATE TABLE jobs (
-  id        INTEGER PRIMARY KEY,
-  status    TEXT NOT NULL DEFAULT 'pending',
-  retry     INTEGER NOT NULL DEFAULT 0,
-  owner_id  INTEGER REFERENCES users(id),
-  ...
-);
-CREATE VIEW failed_jobs AS ...;
-CREATE INDEX idx_jobs_status ON jobs(status);
-```
-
-**The schema tool returns no TOON.** TOON is for row data only. One `CREATE TABLE` statement states
-the columns, the types, the nullability, the defaults, the primary key, the foreign keys and the
-constraints in one string. A set of TOON tables holds the same facts in a shape that the agent must
-assemble again, and it costs more tokens.
-
-The internal `sqlite_%` objects are excluded, thus `sqlite_autoindex` and `sqlite_sequence` never
-reach the agent.
-
-This choice is cheap to reverse. A real agent must still confirm that the DDL output is usable. See
-[../plans/open-questions.md](../plans/open-questions.md).
+One server-authored `SELECT` over `sqlite_master`, no parameter, no sandbox needed. It returns DDL
+text and **not** TOON, because one `CREATE TABLE` statement carries the columns, types, nullability,
+defaults, keys and constraints in one string. See [schema-output.md](schema-output.md).
 
 ## `query`
 
@@ -145,83 +152,55 @@ The rows are TOON. See [query-results.md](query-results.md). The rejections are 
 [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md), and the codes are in
 [error-model.md](error-model.md).
 
-## `insert`
+## `insert`, `update` and `delete`
 
-```csharp
-public async Task<CallToolResult> InsertAsync(
-    string? requestId = null,
-    string? table = null,
-    Dictionary<string, JsonElement>? values = null,
-    CancellationToken cancellationToken = default)
-```
+Three, four and five arguments. The caller sends no SQL: the server builds one parameterized
+statement. Every mandatory argument carries `= null` and is validated in the method body, thus the
+generated schema marks nothing required and the description carries the requirement instead. All three
+share one private path, `RunStructuredWriteAsync`, which owns the order of the controls.
 
-Three arguments. The caller sends no SQL: the server builds one parameterized `INSERT` that adds
-exactly one row. See [../database/structured-writes.md](../database/structured-writes.md).
-
-```text
-rowsAffected: 1
-rowid: 78
-```
-
-**Lesson.** Each mandatory argument carries `= null` and is validated in the method body. A nullable
-type alone is **not** enough: the binder of the SDK treats a parameter with no default value as
-required and throws when the argument is absent, and the SDK then replaces the message with `"An error
-occurred invoking 'insert'."`. The agent gets no code to select from, and the required case
-"write without requestId -> `InvalidWrite`" cannot pass.
-`WriteIdempotencyTests.AnAbsentRequestIdIsInvalidWrite` fails if the defaults are removed.
-
-The cost is that the generated JSON schema marks **no** argument as required:
-
-```json
-{"type":"object","properties":{
-  "requestId":{"type":["string","null"],"default":null,"description":"..."},
-  "table":{"type":["string","null"],"default":null,"description":"..."},
-  "values":{"type":["object","null"],"default":null,"description":"..."}}}
-```
-
-The tool description carries the requirement instead. That trade is correct: a description that the
-agent reads plus an actionable error beats a schema keyword plus an opaque failure.
-
-The description must also state the three limits that the schema cannot show: a value is a literal and
-never a SQL expression, one call adds one row, and there is no conflict clause.
-
-## `update` and `delete`
-
-```csharp
-public async Task<CallToolResult> UpdateAsync(
-    string? requestId = null,
-    string? table = null,
-    Dictionary<string, JsonElement>? values = null,
-    List<WriteCondition>? where = null,
-    int? maxRows = null,
-    CancellationToken cancellationToken = default)
-```
-
-`delete` is the same without `values`. `where` and `maxRows` are mandatory and follow the same
-`= null` rule as every other write argument. See
+See [write-tool-arguments.md](write-tool-arguments.md) and
 [../database/structured-writes.md](../database/structured-writes.md).
 
-```text
-rowsAffected: 1
-rowsChanged: 4
+## `backup`
+
+```csharp
+public const string BackupToolName = "backup";
+
+[McpServerTool(Name = BackupToolName, ReadOnly = true)]
+public async Task<CallToolResult> BackupAsync(string? label = null, CancellationToken ct = default)
 ```
 
-The description of `maxRows` must state that the number counts every row the write touches, including
-a row that `ON DELETE CASCADE` removes in another table. It is the surprising part of the contract:
-deleting one row that has three cascading children needs a `maxRows` of at least 4. See
-[../decisions/0004-maxrows-bounds-total-changes.md](../decisions/0004-maxrows-bounds-total-changes.md).
+One optional argument, and it is a **label and not a path**: the server builds the file name. The
+tool takes the backup slot and **no request slot**, because the copy outlives the request that
+started it. `Program` reads `BackupToolName` to mark this one tool as task-mode, thus the name lives
+in one place.
 
-The description of `where` must name the eight operators. The generated schema types them as a plain
-string, thus the text is the only place the agent can read the set.
+```text
+name: app-20260928T034150Z-before-cleanup.db
+bytes: 18468864
+restarts: 2
+```
 
-**The three write tools share one private path**, `RunStructuredWriteAsync`. It holds the order of the
-controls — deduplication, budget, request slot, write slot, execute, charge, cache — thus the order
-cannot drift between one tool and another. Each tool method owns only its own shape validation and its
-result format.
+See [../database/backups.md](../database/backups.md).
+
+## `diagnostics`
+
+```csharp
+[McpServerTool(Name = "diagnostics", ReadOnly = true)]
+public async Task<CallToolResult> DiagnosticsAsync(CancellationToken cancellationToken)
+```
+
+No arguments at all, and `DiagnosticsToolTests.DiagnosticsTakesNoArguments` asserts that the
+generated schema has no property. A caller-supplied `PRAGMA` name would be a write primitive and an
+information leak. See [../database/diagnostics.md](../database/diagnostics.md).
 
 ## Related
 
 - [../database/structured-writes.md](../database/structured-writes.md)
+- [../database/backups.md](../database/backups.md)
+- [../database/diagnostics.md](../database/diagnostics.md)
+- [schema-output.md](schema-output.md)
 - [../security/write-controls.md](../security/write-controls.md)
 - [../security/permissions.md](../security/permissions.md)
 - [../database/connections.md](../database/connections.md)

@@ -1,7 +1,7 @@
 # MCP tool catalog
 
 The sidecar has one MCP endpoint at `/db/mcp` over Streamable HTTP. The catalog has nine tools at
-most, and three of them exist. The path is the whole public path on purpose. See
+most, and five of them exist. The path is the whole public path on purpose. See
 [../security/public-endpoint.md](../security/public-endpoint.md).
 
 Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidecar/Program.cs`.
@@ -11,8 +11,8 @@ Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidec
 | `schema` | `schema` | no | no | **Implemented** |
 | `query` | `read` | yes, read-only | no | **Implemented** |
 | `insert` | `write` | no | mandatory | **Implemented** |
-| `update` | `write` | no | mandatory | Phase 4b |
-| `delete` | `write` | no | mandatory | Phase 4b |
+| `update` | `write` | no | mandatory | **Implemented** |
+| `delete` | `write` | no | mandatory | **Implemented** |
 | `backup` | `backup` | no | no | Phase 5 |
 | `backup_status` | `backup` | no | no | Phase 5 |
 | `diagnostics` | `diagnostics` | no | no | Phase 5 |
@@ -20,7 +20,10 @@ Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/SqliteTools.cs`, `src/Xakpc.SQLiteMCPSidec
 
 A permission that has no tool yet exposes nothing.
 `PermissionGatingTests.OnlyTheImplementedToolsAreExposed` starts a deployment with every permission
-and asserts that `tools/list` holds `schema`, `query` and `insert` only.
+and asserts that `tools/list` holds `schema`, `query`, `insert`, `update` and `delete` only.
+
+Adding a tool needs no name list anywhere. `AddAuthorizationFilters()` reads the `[Authorize]`
+attribute on the method, and that one attribute gives both gating layers.
 
 ## Server registration
 
@@ -181,6 +184,40 @@ agent reads plus an actionable error beats a schema keyword plus an opaque failu
 
 The description must also state the three limits that the schema cannot show: a value is a literal and
 never a SQL expression, one call adds one row, and there is no conflict clause.
+
+## `update` and `delete`
+
+```csharp
+public async Task<CallToolResult> UpdateAsync(
+    string? requestId = null,
+    string? table = null,
+    Dictionary<string, JsonElement>? values = null,
+    List<WriteCondition>? where = null,
+    int? maxRows = null,
+    CancellationToken cancellationToken = default)
+```
+
+`delete` is the same without `values`. `where` and `maxRows` are mandatory and follow the same
+`= null` rule as every other write argument. See
+[../database/structured-writes.md](../database/structured-writes.md).
+
+```text
+rowsAffected: 1
+rowsChanged: 4
+```
+
+The description of `maxRows` must state that the number counts every row the write touches, including
+a row that `ON DELETE CASCADE` removes in another table. It is the surprising part of the contract:
+deleting one row that has three cascading children needs a `maxRows` of at least 4. See
+[../decisions/0004-maxrows-bounds-total-changes.md](../decisions/0004-maxrows-bounds-total-changes.md).
+
+The description of `where` must name the eight operators. The generated schema types them as a plain
+string, thus the text is the only place the agent can read the set.
+
+**The three write tools share one private path**, `RunStructuredWriteAsync`. It holds the order of the
+controls — deduplication, budget, request slot, write slot, execute, charge, cache — thus the order
+cannot drift between one tool and another. Each tool method owns only its own shape validation and its
+result format.
 
 ## Related
 

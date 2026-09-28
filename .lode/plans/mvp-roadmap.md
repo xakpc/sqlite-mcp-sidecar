@@ -6,7 +6,7 @@ decisions are in [open-questions.md](open-questions.md).
 
 ## Current state
 
-Phase 0 to Phase 3 are done. Phase 2 and Phase 3 shipped together. See
+Phase 0 to Phase 4b are done. Phase 2 and Phase 3 shipped together. See
 [../summary.md](../summary.md) for the status table.
 
 ## Sequence
@@ -15,8 +15,8 @@ Phase 0 to Phase 3 are done. Phase 2 and Phase 3 shipped together. See
 flowchart TD
     p0[Phase 0: strip the template — done] --> p1[Phase 1: configuration and auth — done]
     p1 --> p23[Phase 2+3: sandbox, query and TOON — done]
-    p23 --> p4a[Phase 4a: the write path and insert]
-    p4a --> p4b[Phase 4b: the filter, update and delete]
+    p23 --> p4a[Phase 4a: the write path and insert — done]
+    p4a --> p4b[Phase 4b: the filter, update and delete — done]
     p4b --> p5[Phase 5: backup and diagnostics]
     p5 --> p6[Phase 6: danger-raw-write]
     p6 --> p7[Phase 7: container and docs]
@@ -86,7 +86,7 @@ codebase holds no uncalled code:
 
 Their design stays in [design/connection-policy.md](design/connection-policy.md).
 
-### Phase 4a — the write path and `insert`
+### Phase 4a — the write path and `insert`. Done
 
 - The read-write connection, with `ForeignKeys = true`. See [design/connection-policy.md](design/connection-policy.md).
 - The write semaphore, with a wait that the busy timeout bounds.
@@ -96,22 +96,33 @@ Their design stays in [design/connection-policy.md](design/connection-policy.md)
 - `Security/WriteDeduplication.cs`. See [design/write-idempotency.md](design/write-idempotency.md).
 - `insert`, with a mandatory `requestId`. Three arguments, no filter and no `maxRows`.
 
-Done when: an `insert` adds one row, the same `requestId` applies it one time only, and many small
-writes return `WriteBudgetExceeded`.
+An `insert` adds one row, the same `requestId` applies it one time only, and many small writes return
+`WriteBudgetExceeded`. Current state:
+[../database/structured-writes.md](../database/structured-writes.md),
+[../security/write-controls.md](../security/write-controls.md).
 
-### Phase 4b — the filter model, `update` and `delete`
+### Phase 4b — the filter model, `update` and `delete`. Done
 
-- The flat filter model. See [design/structured-writes.md](design/structured-writes.md).
-- `update` and `delete`, with mandatory `where`, `maxRows` and `requestId`.
-- `BEGIN IMMEDIATE`, the bounded pre-count and the row-limit rollback.
+Current state: [../database/structured-writes.md](../database/structured-writes.md),
+[../mcp/tool-catalog.md](../mcp/tool-catalog.md),
+[../decisions/0004-maxrows-bounds-total-changes.md](../decisions/0004-maxrows-bounds-total-changes.md),
+[../decisions/0005-and-only-filter.md](../decisions/0005-and-only-filter.md).
 
-Done when: a broad filter is rejected before the write starts, an over-limit write rolls back,
-both return `WriteLimitExceeded`, and the rows are unchanged after each rejection.
+`StructuredWriteBuilder` holds the flat filter model, the three builders and the bounded pre-count.
+`SqliteService.MutateAsync` holds `BEGIN IMMEDIATE`, the two checks and the row-limit rollback.
+`SqliteTools.RunStructuredWriteAsync` holds the order of the controls for all three write tools.
 
-**Why the split is here.** The boundary is the filter. `insert` needs no filter, no `maxRows` and no
-pre-count, thus 4a builds each control that `insert` calls and nothing more. The filter model, the
-pre-count and the rollback have their first caller in 4b. This keeps the Phase 2+3 rule: the
+A broad filter is rejected before the write starts, an over-limit write rolls back, both return
+`WriteLimitExceeded`, and the rows are unchanged after each rejection.
+
+**Why the split was here.** The boundary is the filter. `insert` needs no filter, no `maxRows` and no
+pre-count, thus 4a built each control that `insert` calls and nothing more. The filter model, the
+pre-count and the rollback got their first caller in 4b. This kept the Phase 2+3 rule: the
 codebase holds no uncalled code.
+
+**Lesson.** The obvious row count is the wrong one. `ExecuteNonQuery` reports the target table alone,
+thus a `delete` with `maxRows = 1` would pass both checks and still destroy a whole cascade subtree.
+The limit counts `sqlite3_total_changes`, and that also made the post-execution branch testable.
 
 ### Phase 5 — backup and diagnostics
 

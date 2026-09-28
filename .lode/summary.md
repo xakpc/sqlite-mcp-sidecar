@@ -17,9 +17,13 @@ authentication, permission gating, the stateless MCP endpoint at `/db/mcp`, the 
 always-on SQLite sandbox, the `schema` and `query` tools, TOON results, and a dual-target end-to-end
 test harness.
 
-The write path is open. `insert` exists with the write connection, the write semaphore, the write
-authorizer policy, identifier validation, the write budget and the idempotency cache. `update` and
-`delete` need the filter model and the bounded pre-count, which is Phase 4b.
+The structured write path is complete. `insert`, `update` and `delete` all exist, over the write
+connection, the write semaphore, the write authorizer policy, identifier validation, the flat filter
+model, the bounded pre-count, the row-limit rollback, the write budget and the idempotency cache.
+`maxRows` bounds every row that a write changes, a cascade and a trigger included.
+
+What is left is the operational half: backups and diagnostics (Phase 5), the optional
+`danger-raw-write` escape hatch (Phase 6), and the container and documentation (Phase 7).
 
 | Area | State |
 | --- | --- |
@@ -36,7 +40,7 @@ authorizer policy, identifier validation, the write budget and the idempotency c
 | Write connection, write semaphore, write authorizer policy | Implemented — [database/connections.md](database/connections.md), [database/sqlite-sandbox.md](database/sqlite-sandbox.md) |
 | `insert` and identifier validation | Implemented — [database/structured-writes.md](database/structured-writes.md) |
 | Write budget and write idempotency | Implemented — [security/write-controls.md](security/write-controls.md) |
-| `update`, `delete`, the filter model, the pre-count | Not started — Phase 4b |
+| `update`, `delete`, the filter model, the pre-count | Implemented — [database/structured-writes.md](database/structured-writes.md) |
 | Backup and diagnostics | Not started — Phase 5 |
 | `danger-raw-write` | Not started — Phase 6 |
 | Container and documentation | Not started — Phase 7 |
@@ -105,7 +109,7 @@ schema   query   insert   update   delete
 backup   backup_status   diagnostics   execute_write_sql
 ```
 
-`schema`, `query` and `insert` exist. The permission set decides which tools exist. See
+The five of the first line exist. The permission set decides which tools exist. See
 [mcp/tool-catalog.md](mcp/tool-catalog.md).
 
 ## Context

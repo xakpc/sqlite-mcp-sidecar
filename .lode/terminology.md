@@ -30,14 +30,16 @@ documentation.
 
 - **structured write** — a write that the server builds from a table name, values and a filter. The caller sends no SQL.
 - **raw write** — a caller-supplied DML statement. It needs `danger-raw-write`.
-- **filter model** — the small set of operators that structured writes accept. It is not a SQL expression language. It is a flat list and not a tree.
-- **`combine`** — the value that joins each condition of a filter, `and` or `or`. The default is `and`.
+- **filter model** — the small set of operators that structured writes accept. It is not a SQL expression language. It is a flat list and not a tree, and every condition joins with `and`. There is no `or`.
+- **condition** — one item of a filter: a column, an operator and, for a comparison, a value.
 - **canonical name** — the spelling of a table or a column that the live schema holds. The server quotes this name into a statement, never the name that the caller sent.
 - **literal value** — a value that a structured write accepts: a string, a number, a boolean or null. A SQL expression is not a value.
-- **`maxRows`** — the caller-declared upper bound on affected rows. It is mandatory for structured `update` and `delete`.
+- **`maxRows`** — the caller-declared upper bound on changed rows. It is mandatory for structured `update` and `delete`.
 - **effective limit** — `min(client maxRows, SQLITE_SIDECAR_MAX_WRITE_ROWS)`.
+- **`rowsAffected`** — the rows of the target table that a write changed. It is what the agent asked about.
+- **`rowsChanged`** — every row that a write changed, including a row that `ON DELETE CASCADE` removed and a row that a trigger wrote. It is the blast radius, and it is the number that the effective limit bounds and that the write budget counts.
 - **bounded pre-count** — the `LIMIT N+1` count that runs before a structured `update` or `delete`. It rejects a broad filter before any write.
-- **row-limit rollback** — the rollback that reverts a structured write when the affected row count is more than the effective limit.
+- **row-limit rollback** — the rollback that reverts a structured write when `rowsChanged` is more than the effective limit.
 - **write budget** — the rolling per-minute cap on total written rows for the sidecar **process**. It is not shared between processes. Do not confuse it with the **request budget**.
 - **`requestId`** — the mandatory idempotency key on each write tool. The same key returns the stored response of a committed write.
 - **replayed write** — a write request that the sidecar answered from the idempotency cache. It changed nothing.

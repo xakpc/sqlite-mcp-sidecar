@@ -26,6 +26,15 @@ CREATE TABLE logs (
   message TEXT NOT NULL
 );
 
+-- job_tags cascades on purpose. It is the one table that makes the blast radius of a delete larger
+-- than the rows the filter selects, thus it is what proves that maxRows bounds the cascade too.
+-- logs does NOT cascade: a delete of a job with logs must still fail with a foreign key violation.
+CREATE TABLE job_tags (
+  id      INTEGER PRIMARY KEY,
+  job_id  INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  tag     TEXT NOT NULL
+);
+
 CREATE INDEX idx_jobs_status ON jobs(status);
 CREATE INDEX idx_logs_job ON logs(job_id);
 
@@ -48,3 +57,8 @@ INSERT INTO logs (job_id, level, message) VALUES
   (41, 'error', 'import failed'),
   (52, 'error', 'export failed'),
   (53, 'info', 'queued');
+
+INSERT INTO job_tags (job_id, tag) VALUES
+  (41, 'import'),
+  (41, 'retry'),
+  (52, 'export');

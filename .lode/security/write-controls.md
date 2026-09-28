@@ -1,6 +1,8 @@
 # Write controls: the budget and the idempotency cache
 
-Current state. Both exist and `insert` calls both.
+Current state. Both exist, and `insert`, `update` and `delete` all call both through one shared path,
+`SqliteTools.RunStructuredWriteAsync`. That method owns the order of the controls, thus the order
+cannot drift between one write tool and another.
 
 Code: `src/Xakpc.SQLiteMCPSidecar/Security/WriteBudget.cs`,
 `src/Xakpc.SQLiteMCPSidecar/Security/WriteDeduplication.cs`.
@@ -40,6 +42,11 @@ A rolling one-minute window over a queue of `(timestamp, rows)`.
 thus it must not consume the budget of a write that would succeed.
 `WriteBudgetTests.ARejectedWriteConsumesNoBudget` proves it.
 
+**Invariant.** Count `rowsChanged` and never `rowsAffected`. A row that `ON DELETE CASCADE` removed
+and a row that a trigger wrote are real write volume, thus one `delete` that cascades into a thousand
+rows must cost a thousand and not one. See
+[../decisions/0004-maxrows-bounds-total-changes.md](../decisions/0004-maxrows-bounds-total-changes.md).
+
 **Invariant.** `HasCapacity` is a gate and not a reservation. One write can therefore cross the cap,
 because the affected row count is not known before execution. `SQLITE_SIDECAR_MAX_WRITE_ROWS` already
 bounds one write, thus the overshoot is bounded and the budget throttles the **next** operation.
@@ -78,6 +85,14 @@ call, thus no flag marks it. The `replayed=true` field of the log line is the on
 column order of a JSON object is not significant, thus without the ordering the same request with a
 different key order would read as different work and break a correct retry.
 `WriteIdempotencyTests.TheKeyOrderOfTheValuesObjectDoesNotChangeTheIdentity` proves it.
+
+**Invariant.** The order of the `where` list stays as the caller sent it. A client library reorders
+the members of an object, which is why the values are sorted, but it never reorders the items of an
+array.
+
+**Invariant.** The canonical text starts with the tool name, thus one `requestId` reused across two
+different tools is a `PayloadConflict` and not a replay.
+`UpdateToolTests.ARequestIdFromAnInsertConflictsWithAnUpdate` proves it.
 
 The entry holds a SHA-256 hash and never the canonical text, thus the cache holds no column value.
 

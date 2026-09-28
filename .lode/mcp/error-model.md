@@ -43,11 +43,11 @@ with this code. The outcome is the same and the agent must stop. See
 | `QueryRejected` | The authorizer rejected an action. | Stop. The action is not available. | `query` |
 | `QueryTimedOut` | Execution passed the query timeout. | Make the query smaller. | `query`, `schema` |
 | `ResultTooLarge` | One single row is larger than the byte budget. | Select fewer columns. | `query` |
-| `InvalidWrite` | An invalid `requestId`, an unknown table or column, a value with no SQLite equivalent, a constraint violation, or (Phase 4b) a missing `where` or `maxRows`. | Correct the request. | `insert` |
-| `WriteLimitExceeded` | The filter matched more rows than the effective limit. Nothing changed. | Narrow the filter. | Phase 4b |
-| `WriteBudgetExceeded` | The per-minute write budget is empty. | Wait, then retry with the same `requestId`. | `insert` |
-| `DatabaseBusy` | The busy timeout expired, or the write slot did not free. | Retry later with the same `requestId`. | `query`, `insert` |
-| `DatabaseError` | Any other SQLite failure. | Report to the operator. | `query`, `schema`, `insert` |
+| `InvalidWrite` | An invalid `requestId`, an unknown table or column, a value with no SQLite equivalent, a constraint violation, a missing or empty `where`, a missing `maxRows`, or a malformed condition. | Correct the request. | `insert`, `update`, `delete` |
+| `WriteLimitExceeded` | The write would change more rows than the effective limit, counting a cascade and a trigger. Nothing changed. | Narrow the filter. | `update`, `delete` |
+| `WriteBudgetExceeded` | The per-minute write budget is empty. | Wait, then retry with the same `requestId`. | `insert`, `update`, `delete` |
+| `DatabaseBusy` | The busy timeout expired, or the write slot did not free. | Retry later with the same `requestId`. | `query`, and every write tool |
+| `DatabaseError` | Any other SQLite failure. | Report to the operator. | `query`, `schema`, and every write tool |
 | `BackupFailed` | The label is invalid, a backup is in progress, or the copy failed. | Report to the operator. | Phase 5 |
 
 ## Selection on the read path
@@ -87,7 +87,7 @@ the agent needs no distinction: the next action is to read the schema and send a
 ```mermaid
 flowchart TD
     w[Write request] --> shape{Shape}
-    shape -->|absent requestId, over 128 chars, absent table, empty values| iw[InvalidWrite]
+    shape -->|"absent requestId, over 128 chars, absent table, empty values, absent or empty where, absent maxRows"| iw[InvalidWrite]
     shape -->|ok| dedup{requestId in the cache?}
     dedup -->|same payload| rep[Return the stored response]
     dedup -->|different payload| iw
@@ -95,7 +95,11 @@ flowchart TD
     bud -->|no| wb[WriteBudgetExceeded]
     bud -->|yes| ident{Table and columns exist?}
     ident -->|no, or a view| iw
-    ident -->|yes| run[Execute]
+    ident -->|yes| pre{"Pre-count <= effective limit?"}
+    pre -->|no| wl[WriteLimitExceeded]
+    pre -->|yes| run[Execute]
+    run --> post{"rowsChanged <= effective limit?"}
+    post -->|no| wl
     run --> sq{SqliteErrorCode}
     sq -->|19 CONSTRAINT| iw
     sq -->|5 BUSY, 6 LOCKED| db[DatabaseBusy]
@@ -116,8 +120,13 @@ another writer holds the lock, thus retry later. See
 
 A structured `update` or `delete` can fail the bounded pre-count, or it can fail the count after
 execution and roll back. Both give `WriteLimitExceeded`, because the next action of the agent is the
-same and in both cases nothing changed. The log records which check rejected the operation. See
-[../plans/design/structured-writes.md](../plans/design/structured-writes.md).
+same and in both cases nothing changed.
+
+The log records which check rejected the operation, in the `check=pre|post` field of event 2005. That
+line is the only evidence an operator has, and the two mean different things: `pre` is a filter that
+was wider than the agent expected, `post` is a cascade, a trigger, or the owning application writing
+between the count and the write. See
+[../database/structured-writes.md](../database/structured-writes.md).
 
 ## Errors and the idempotency cache
 
@@ -157,4 +166,4 @@ never goes out without a change.
 - [../database/sqlite-sandbox.md](../database/sqlite-sandbox.md)
 - [query-results.md](query-results.md)
 - [../plans/design/threat-model.md](../plans/design/threat-model.md)
-- [../plans/design/structured-writes.md](../plans/design/structured-writes.md)
+- [../database/structured-writes.md](../database/structured-writes.md)

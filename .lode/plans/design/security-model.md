@@ -33,7 +33,7 @@ flowchart TD
 - **Request budget** — one fixed window for each process, before authentication. See [../../security/public-endpoint.md](../../security/public-endpoint.md).
 - **Bearer token** — one token for each deployment. See [../../security/authentication.md](../../security/authentication.md).
 - **Permissions** — they decide which tools exist. See [../../security/permissions.md](../../security/permissions.md).
-- **Agent protections** — structured writes, mandatory predicate, mandatory `maxRows`, bounded pre-count, row-limit rollback, server row limit, write budget, mandatory idempotency key. See [structured-writes.md](structured-writes.md).
+- **Agent protections** — structured writes, mandatory predicate, mandatory `maxRows` over every changed row, bounded pre-count, row-limit rollback, server row limit, write budget, mandatory idempotency key. See [../../database/structured-writes.md](../../database/structured-writes.md).
 - **SQLite sandbox** — authorizer, defensive mode, runtime limits, interrupt. See [sqlite-sandbox.md](../../database/sqlite-sandbox.md).
 
 The agent protections layer is the only layer that `danger-raw-write` makes weaker, and it
@@ -49,8 +49,9 @@ With the default configuration, these statements are true:
 - `read` does not imply `write`.
 - A write permission is not valid without `schema` and `read`.
 - `write` does not accept caller-supplied write SQL.
-- Structured `update` and `delete` need a predicate.
+- Structured `update` and `delete` need a predicate, and the predicate joins with `AND` only.
 - Structured `update` and `delete` have a hard row limit, and a broad filter is rejected before the write starts.
+- That row limit counts **every** row the write changes, so a delete cannot destroy an unbounded cascade subtree while reporting one row.
 - A repeated write with the same `requestId` applies one time only.
 - Repeated structured writes reach a rate limit.
 - Raw writes need an explicitly dangerous permission.

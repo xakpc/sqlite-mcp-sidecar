@@ -39,6 +39,8 @@ flowchart TD
     m1 --> c3[Server maxWriteRows]
     m1 --> c4[Bounded pre-count]
     m1 --> c5[Row-limit rollback]
+    m1b[Delete that cascades or fires a trigger] --> c5b[maxRows counts total changes]
+    m1b --> c5
     m2[Repeated small destruction] --> c6[Write-rate budget]
     m3[Retry after a lost response] --> c7[Mandatory requestId]
     m4[Expensive query] --> c8[Query timeout and sqlite3_interrupt]
@@ -52,10 +54,15 @@ flowchart TD
     m7[Caller-written SQL] --> c15[Structured writes only]
 ```
 
+A delete that cascades is the case where the obvious implementation fails: the rows of the target
+table stay inside `maxRows` while an unbounded subtree disappears. `maxRows` therefore counts every
+row the statement changes. See
+[../../decisions/0004-maxrows-bounds-total-changes.md](../../decisions/0004-maxrows-bounds-total-changes.md).
+
 The `write` permission has all of the controls above. `danger-raw-write` deliberately removes
-five of them: structured writes, the mandatory predicate, the mandatory `maxRows`, the
-bounded pre-count and the server-generated SQL. It keeps the idempotency key and the write
-budget. That difference must be obvious in the README and in `SECURITY.md`.
+six of them: structured writes, the mandatory predicate, the mandatory `maxRows`, the
+bounded pre-count, the total-changes bound and the server-generated SQL. It keeps the idempotency key
+and the write budget. That difference must be obvious in the README and in `SECURITY.md`.
 
 ## The mistake that the MVP does not mitigate
 
@@ -150,4 +157,4 @@ The sidecar does not defend against these threats:
 
 - [security-model.md](security-model.md)
 - [sqlite-sandbox.md](../../database/sqlite-sandbox.md)
-- [structured-writes.md](structured-writes.md)
+- [../../database/structured-writes.md](../../database/structured-writes.md)

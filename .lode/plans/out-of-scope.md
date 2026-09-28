@@ -27,6 +27,7 @@ browser UI
 DDL
 
 structured conflict clauses
+or in a structured filter
 nested filter trees
 RETURNING on a structured write
 
@@ -88,11 +89,18 @@ REPLACE` deletes the row that it replaces and it cascades into each referencing 
 `insert` would destroy data. That is the failure that the structured layer exists to prevent. An
 agent that needs conflict behaviour reads the row first, or the deployment gives it
 `danger-raw-write`. The cost is one more call. See
-[design/structured-writes.md](design/structured-writes.md).
+[../database/structured-writes.md](../database/structured-writes.md).
 
-**Nested filter trees.** The structured filter is a flat condition list with one `combine` value. A
-nested `and`/`or` tree needs a recursive type and a self-referencing JSON schema, which is harder
-for an agent to fill correctly, for a shape that a second call also expresses.
+**`or` in a structured filter.** Every condition joins with `and`. A disjunction is one call for each
+branch, and that is the **tighter** bound: each call is pre-counted and limited on its own, while one
+`or` call pools the blast radius of every branch into a single `maxRows`. The one real argument for
+`or` is atomicity across the branches, and the sidecar offers no cross-call atomicity in any case. See
+[../decisions/0005-and-only-filter.md](../decisions/0005-and-only-filter.md).
+
+**Nested filter trees.** The structured filter is a flat condition list. A nested `and`/`or` tree
+needs a recursive type and a self-referencing JSON schema, which is harder for an agent to fill
+correctly, for a shape that a second call also expresses. Without `or` there is also no disjunction
+left to nest.
 
 **`RETURNING` on a structured write.** A structured write answers `rowsAffected`, and `insert` also
 answers `rowid`. A `RETURNING` list would bring the TOON result path, a second result shape and a

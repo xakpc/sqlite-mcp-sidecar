@@ -5,15 +5,15 @@
 > the order of the controls, the payload hash and the invariants. The decision is in
 > [../../decisions/0003-mandatory-idempotency-key.md](../../decisions/0003-mandatory-idempotency-key.md).
 
-This file keeps only the part that no code covers yet: the scope table, because three tools of the
-catalog do not exist.
+This file keeps only the part that no code covers yet: the scope row of the one write tool that the
+catalog does not have yet, `execute_write_sql`.
 
 ## Scope
 
 | Tool | `requestId` | State |
 | --- | --- | --- |
 | `insert` | mandatory | Implemented |
-| `update`, `delete` | mandatory | Phase 4b |
+| `update`, `delete` | mandatory | Implemented |
 | `execute_write_sql` | mandatory | Phase 6 |
 | `query`, `schema`, `diagnostics` | not used | — |
 | `backup`, `backup_status` | not used | — |
@@ -29,6 +29,6 @@ identifier that carries a different payload. See [raw-writes.md](raw-writes.md).
 ## Related
 
 - [../../security/write-controls.md](../../security/write-controls.md) — current state
-- [structured-writes.md](structured-writes.md)
+- [../../database/structured-writes.md](../../database/structured-writes.md)
 - [raw-writes.md](raw-writes.md)
 - [../../mcp/error-model.md](../../mcp/error-model.md)

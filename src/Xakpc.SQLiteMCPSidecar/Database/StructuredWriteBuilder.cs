@@ -43,6 +43,28 @@ internal sealed record TableSchema(string Name, IReadOnlyList<string> Columns)
 internal sealed record StructuredStatement(string Sql, IReadOnlyList<object?> Parameters);
 
 /// <summary>
+/// One condition of a structured filter. The filter is a flat list and never a tree, and every
+/// condition joins with <c>AND</c>.
+/// </summary>
+/// <param name="Column">A column of the target table, in any spelling.</param>
+/// <param name="Operator">One of <c>eq ne lt lte gt gte is-null is-not-null</c>.</param>
+/// <param name="Value">The literal to compare with. <c>is-null</c> and <c>is-not-null</c> take none.</param>
+/// <remarks>
+/// <para>
+/// <b>Lesson.</b> <see cref="Operator"/> is a string and not an enum. An enum makes the binder of the
+/// SDK throw on an unknown value, and the SDK then replaces the message with its own fixed text, thus
+/// the agent gets no error code to select from. The operator set is named in the tool description and
+/// in the rejection message instead. See <c>.lode/mcp/error-model.md</c>.
+/// </para>
+/// <para>
+/// Every member is nullable for the same reason: the deserializer of the SDK leaves an absent JSON
+/// member as <c>null</c> whatever the declared type says, thus the validation lives in the builder and
+/// reaches the error model.
+/// </para>
+/// </remarks>
+public sealed record WriteCondition(string? Column, string? Operator, JsonElement? Value = null);
+
+/// <summary>
 /// Builds the parameterized statement of a structured write. The caller never supplies SQL.
 /// </summary>
 /// <remarks>
@@ -156,7 +178,7 @@ internal static class StructuredWriteBuilder
     /// <remarks>
     /// One call adds exactly one row. That bound needs no check at run time, because the statement
     /// shape cannot express a second row and it cannot express <c>INSERT ... SELECT</c>. This is the
-    /// reason the structured tool exists: see <c>.lode/plans/design/structured-writes.md</c>.
+    /// reason the structured tool exists: see <c>.lode/database/structured-writes.md</c>.
     /// </remarks>
     public static StructuredStatement BuildInsert(
         TableSchema schema,
@@ -193,6 +215,220 @@ internal static class StructuredWriteBuilder
         return new StructuredStatement(sql, parameters);
     }
 
+    /// <summary>
+    /// Builds <c>UPDATE "t" SET "a" = $p0 WHERE "b" = $p1</c>.
+    /// </summary>
+    /// <remarks>
+    /// The <c>SET</c> parameters and the <c>WHERE</c> parameters share one ordered list, thus the
+    /// numbering continues across the two clauses.
+    /// </remarks>
+    public static StructuredStatement BuildUpdate(
+        TableSchema schema,
+        IReadOnlyDictionary<string, JsonElement> values,
+        IReadOnlyList<WriteCondition> where)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(where);
+
+        if (values.Count == 0)
+        {
+            throw new InvalidWriteException("The values object is empty. Name at least one column and its new value.");
+        }
+
+        GuardFilter(where);
+
+        var parameters = new List<object?>(values.Count + where.Count);
+        var sql = new StringBuilder("UPDATE ").Append(Quote(schema.Name)).Append(" SET ");
+
+        var first = true;
+        foreach (var (column, value) in values)
+        {
+            if (!first)
+            {
+                sql.Append(", ");
+            }
+
+            first = false;
+            sql.Append(Quote(schema.CanonicalColumn(column))).Append(" = $p").Append(parameters.Count);
+            parameters.Add(ToSqliteValue(column, value));
+        }
+
+        AppendWhere(sql, schema, where, parameters);
+        sql.Append(';');
+
+        GuardParameterCount(parameters.Count);
+        return new StructuredStatement(sql.ToString(), parameters);
+    }
+
+    /// <summary>Builds <c>DELETE FROM "t" WHERE "a" = $p0</c>.</summary>
+    public static StructuredStatement BuildDelete(TableSchema schema, IReadOnlyList<WriteCondition> where)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(where);
+
+        GuardFilter(where);
+
+        var parameters = new List<object?>(where.Count);
+        var sql = new StringBuilder("DELETE FROM ").Append(Quote(schema.Name));
+
+        AppendWhere(sql, schema, where, parameters);
+        sql.Append(';');
+
+        GuardParameterCount(parameters.Count);
+        return new StructuredStatement(sql.ToString(), parameters);
+    }
+
+    /// <summary>
+    /// Builds the bounded pre-count, <c>SELECT COUNT(*) FROM (SELECT 1 FROM "t" WHERE ... LIMIT N)</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The subquery carries the <c>LIMIT</c>, thus SQLite stops after <c>N</c> rows and a filter that
+    /// matches a million rows costs the same as one that matches <c>N</c>. The exact count is therefore
+    /// not available, which is why the rejection message names the limit and not the count.
+    /// </para>
+    /// <para>
+    /// The limit is a server-computed integer and never a caller string, thus it goes into the text
+    /// directly. Every value of the filter stays a parameter.
+    /// </para>
+    /// </remarks>
+    public static StructuredStatement BuildPreCount(
+        TableSchema schema,
+        IReadOnlyList<WriteCondition> where,
+        int limit)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(where);
+
+        GuardFilter(where);
+
+        var parameters = new List<object?>(where.Count);
+        var sql = new StringBuilder("SELECT COUNT(*) FROM (SELECT 1 FROM ").Append(Quote(schema.Name));
+
+        AppendWhere(sql, schema, where, parameters);
+        sql.Append(" LIMIT ").Append(limit).Append(");");
+
+        return new StructuredStatement(sql.ToString(), parameters);
+    }
+
+    /// <summary>
+    /// Writes the <c>WHERE</c> clause and appends the bound values to the ordered parameter list.
+    /// </summary>
+    /// <remarks>
+    /// <b>Invariant.</b> Every condition joins with <c>AND</c>. There is no <c>or</c> and no nesting:
+    /// one call therefore has one filter with one blast radius, and a disjunction is two calls that the
+    /// pre-count bounds separately. See <c>.lode/decisions/0005-and-only-filter.md</c>.
+    /// </remarks>
+    private static void AppendWhere(
+        StringBuilder sql,
+        TableSchema schema,
+        IReadOnlyList<WriteCondition> where,
+        List<object?> parameters)
+    {
+        sql.Append(" WHERE ");
+
+        for (var index = 0; index < where.Count; index++)
+        {
+            if (index > 0)
+            {
+                sql.Append(" AND ");
+            }
+
+            var condition = where[index]
+                ?? throw new InvalidWriteException(
+                    $"Condition {index} of where is empty. Each condition needs a column and an operator.");
+
+            if (string.IsNullOrWhiteSpace(condition.Column))
+            {
+                throw new InvalidWriteException(
+                    $"Condition {index} of where names no column. Call the schema tool and name a column of the table.");
+            }
+
+            var column = Quote(schema.CanonicalColumn(condition.Column));
+            var op = condition.Operator?.Trim().ToLowerInvariant();
+
+            if (string.IsNullOrEmpty(op))
+            {
+                throw new InvalidWriteException(
+                    $"Condition {index} of where names no operator. Use one of: {OperatorList}.");
+            }
+
+            if (op is IsNullOperator or IsNotNullOperator)
+            {
+                // A JSON null reads as "no value" and is accepted. A real value means that the agent
+                // expected a comparison, thus it is a misunderstanding and not a harmless extra.
+                if (condition.Value is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null })
+                {
+                    throw new InvalidWriteException(
+                        $"The '{op}' operator of condition {index} takes no value. Remove the value, "
+                      + "or use 'eq' to compare with one.");
+                }
+
+                sql.Append(column).Append(op == IsNullOperator ? " IS NULL" : " IS NOT NULL");
+                continue;
+            }
+
+            var comparison = ComparisonOperator(op)
+                ?? throw new InvalidWriteException(
+                    $"Condition {index} of where uses the unknown operator '{condition.Operator}'. "
+                  + $"Use one of: {OperatorList}.");
+
+            if (condition.Value is not { } value || value.ValueKind == JsonValueKind.Undefined)
+            {
+                throw new InvalidWriteException(
+                    $"The '{op}' operator of condition {index} needs a value. Add one, or use "
+                  + "'is-null' to test for an absent value.");
+            }
+
+            if (value.ValueKind == JsonValueKind.Null)
+            {
+                // "col = NULL" is never true in SQL. A filter that silently matches nothing is worse
+                // for an agent than a rejection: the write reports rowsAffected 0 and looks correct.
+                throw new InvalidWriteException(
+                    $"Condition {index} of where compares '{condition.Column}' with null, which never "
+                  + "matches any row. Use the 'is-null' operator instead.");
+            }
+
+            sql.Append(column).Append(' ').Append(comparison).Append(" $p").Append(parameters.Count);
+            parameters.Add(ToSqliteValue(condition.Column, value));
+        }
+    }
+
+    /// <summary>
+    /// Rejects a filter that would make the statement apply to the whole table.
+    /// </summary>
+    /// <remarks>
+    /// <b>Invariant.</b> There is no structured equivalent of <c>DELETE FROM jobs;</c>. The rejection
+    /// happens before any database work, thus a broad request never takes the write lock.
+    /// </remarks>
+    private static void GuardFilter(IReadOnlyList<WriteCondition> where)
+    {
+        if (where.Count == 0)
+        {
+            throw new InvalidWriteException(
+                "The where list is empty. A structured update or delete always needs at least one "
+              + "condition: there is no way to change every row of a table.");
+        }
+    }
+
+    private const string IsNullOperator = "is-null";
+    private const string IsNotNullOperator = "is-not-null";
+
+    private const string OperatorList = "eq, ne, lt, lte, gt, gte, is-null, is-not-null";
+
+    /// <summary>Maps one filter operator onto its SQL spelling, or <c>null</c> when it is unknown.</summary>
+    private static string? ComparisonOperator(string op) => op switch
+    {
+        "eq" => "=",
+        "ne" => "<>",
+        "lt" => "<",
+        "lte" => "<=",
+        "gt" => ">",
+        "gte" => ">=",
+        _ => null,
+    };
+
     /// <summary>Binds the ordered parameters of a built statement onto a command.</summary>
     public static void Bind(SqliteCommand command, StructuredStatement statement)
     {
@@ -220,12 +456,78 @@ internal static class StructuredWriteBuilder
         ArgumentNullException.ThrowIfNull(values);
 
         var builder = new StringBuilder("insert\n").Append(table.ToLowerInvariant()).Append('\n');
+        AppendCanonicalValues(builder, values);
+        return builder.ToString();
+    }
+
+    /// <summary>The canonical text of an <c>update</c> request, for the idempotency payload hash.</summary>
+    public static string CanonicalUpdatePayload(
+        string table,
+        IReadOnlyDictionary<string, JsonElement> values,
+        IReadOnlyList<WriteCondition> where,
+        int maxRows)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(where);
+
+        var builder = new StringBuilder("update\n").Append(table.ToLowerInvariant()).Append('\n');
+        AppendCanonicalValues(builder, values);
+        AppendCanonicalFilter(builder, where);
+        builder.Append("maxrows=").Append(maxRows).Append('\n');
+        return builder.ToString();
+    }
+
+    /// <summary>The canonical text of a <c>delete</c> request, for the idempotency payload hash.</summary>
+    public static string CanonicalDeletePayload(
+        string table,
+        IReadOnlyList<WriteCondition> where,
+        int maxRows)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(where);
+
+        var builder = new StringBuilder("delete\n").Append(table.ToLowerInvariant()).Append('\n');
+        AppendCanonicalFilter(builder, where);
+        builder.Append("maxrows=").Append(maxRows).Append('\n');
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Writes the values of a request in a stable order.
+    /// </summary>
+    /// <remarks>
+    /// The column order of a JSON object is not significant, thus the keys are ordered here. Without
+    /// the ordering the same request with a different key order would read as different work and
+    /// return <c>InvalidWrite</c> on a correct retry.
+    /// </remarks>
+    private static void AppendCanonicalValues(StringBuilder builder, IReadOnlyDictionary<string, JsonElement> values)
+    {
         foreach (var column in values.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
         {
             builder.Append(column.ToLowerInvariant()).Append('=').Append(values[column].GetRawText()).Append('\n');
         }
+    }
 
-        return builder.ToString();
+    /// <summary>
+    /// Writes the filter of a request.
+    /// </summary>
+    /// <remarks>
+    /// The order of the list stays. A client library reorders the members of a JSON object, which is
+    /// why <see cref="AppendCanonicalValues"/> sorts, but it never reorders the items of an array.
+    /// </remarks>
+    private static void AppendCanonicalFilter(StringBuilder builder, IReadOnlyList<WriteCondition> where)
+    {
+        foreach (var condition in where)
+        {
+            builder.Append("where ")
+                .Append(condition?.Column?.ToLowerInvariant())
+                .Append(' ')
+                .Append(condition?.Operator?.ToLowerInvariant())
+                .Append(' ')
+                .Append(condition?.Value?.GetRawText() ?? "-")
+                .Append('\n');
+        }
     }
 
     /// <summary>Rejects a request that would pass the SQLite parameter limit.</summary>

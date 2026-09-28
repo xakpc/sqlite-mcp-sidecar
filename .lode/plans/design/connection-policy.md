@@ -13,7 +13,7 @@
 | --- | --- | --- | --- |
 | `schema`, `query` | `ReadOnly` | `PRAGMA query_only=ON` | Implemented |
 | `insert` | `ReadWrite` | `ForeignKeys = true` | Implemented |
-| `update`, `delete` | `ReadWrite` | `ForeignKeys = true` | Phase 4b, same connection |
+| `update`, `delete` | `ReadWrite` | `ForeignKeys = true` | Implemented, same connection |
 | `diagnostics` | `ReadOnly` | `PRAGMA query_only=ON` | Phase 5 |
 | `execute_write_sql` | `ReadWrite` | `ForeignKeys = true` | Phase 6, same connection |
 | `backup` source | `ReadOnly` | — | Phase 5 |

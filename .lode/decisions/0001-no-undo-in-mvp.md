@@ -35,6 +35,6 @@ The transaction protects breadth. It does not protect correctness.
 
 ## Related
 
-- [../plans/design/structured-writes.md](../plans/design/structured-writes.md)
+- [../database/structured-writes.md](../database/structured-writes.md)
 - [../plans/design/backups.md](../plans/design/backups.md)
 - [../plans/design/threat-model.md](../plans/design/threat-model.md)

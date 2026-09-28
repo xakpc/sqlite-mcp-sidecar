@@ -51,7 +51,8 @@ permissions=reed                     -> startup fails
 non-WAL database + write permission  -> starts, logs the warning
 ```
 
-Structured write tests. The `insert` list is complete, in `InsertToolTests` and `WriteBudgetTests`:
+Structured write tests. The list is complete, in `InsertToolTests`, `UpdateToolTests`,
+`DeleteToolTests` and `WriteBudgetTests`:
 
 ```text
 write without requestId         -> InvalidWrite            done
@@ -64,18 +65,25 @@ an object as a value            -> InvalidWrite            done
 many small writes over budget   -> WriteBudgetExceeded     done
 a rejected write costs no budget                           done
 
-UPDATE without WHERE            -> InvalidWrite            Phase 4b
-DELETE without WHERE            -> InvalidWrite            Phase 4b
-broad filter, pre-count fails   -> WriteLimitExceeded, no rows written   Phase 4b
-over maxRows after execution    -> rollback, WriteLimitExceeded          Phase 4b
+UPDATE without WHERE            -> InvalidWrite            done
+DELETE without WHERE            -> InvalidWrite            done
+absent or below-one maxRows     -> InvalidWrite            done
+unknown operator                -> InvalidWrite            done
+unknown filter column           -> InvalidWrite            done
+eq with a null value            -> InvalidWrite            done
+broad filter, pre-count fails   -> WriteLimitExceeded, no rows written   done
+over maxRows after execution    -> rollback, WriteLimitExceeded          done
+the deployment cap beats a larger maxRows                  done
 ```
 
-**The last case cannot be forced deterministically** through the public interface. The post-execution
-count differs from the pre-count only when another writer changes the data between the two, and the
-filter model has no non-deterministic operator to exploit. Phase 4b therefore asserts the invariant on
-every run — either success with `rowsAffected <= limit`, or `WriteLimitExceeded` with the table
-unchanged — and the `check=post` log field is the operator-facing evidence. Do not write a test that
-claims to force the second branch.
+**The post-execution case is forced through a cascade.** An earlier version of this file said that the
+branch could not be forced, which was true only while the check counted the target table alone. The
+check counts `sqlite3_total_changes`, thus `ON DELETE CASCADE` widens a write deterministically:
+`DeleteToolTests.ACascadeOverTheLimitRollsBackAndKeepsEveryRow` deletes one job that has three
+cascading `job_tags` rows with `maxRows: 1`. The pre-count sees one row and passes, execution changes
+four, the post check rolls back, and the test asserts that all four rows survive. The `job_tags` table
+exists in `sample-db.sql` for this test. `logs` deliberately does **not** cascade, thus the foreign
+key case still fails as a violation.
 
 Idempotency tests. The list is complete, in `WriteIdempotencyTests`:
 
@@ -136,16 +144,15 @@ one oversized row -> ResultTooLarge
 runaway query -> QueryTimedOut
 ```
 
-`structured insert` is also complete, in `InsertToolTests`: the row arrives with its values unchanged, a
-JSON null becomes a SQLite NULL, and the response carries the new rowid.
+The structured write list is also complete. `InsertToolTests`: the row arrives with its values
+unchanged, a JSON null becomes a SQLite NULL, and the response carries the new rowid.
+`UpdateToolTests` and `DeleteToolTests`: the filter selects the rows, two conditions join with `and`,
+`is-null` matches an absent value, a replay returns the identical response, and a cascade over the
+limit rolls back.
 
 Each remaining item belongs to its phase:
 
 ```text
-structured update
-structured delete
-rollback after a structured maxRows violation
-
 raw INSERT
 raw UPDATE
 raw DELETE

@@ -5,9 +5,35 @@ using Xakpc.SQLiteMCPSidecar.Configuration;
 namespace Xakpc.SQLiteMCPSidecar.Database;
 
 /// <summary>The outcome of a committed structured write.</summary>
-/// <param name="RowsAffected">The rows that the statement changed.</param>
+/// <param name="RowsAffected">The rows of the target table that the statement changed.</param>
 /// <param name="RowId">The rowid of an inserted row. It is 0 for an update and a delete.</param>
-public sealed record StructuredWriteResult(int RowsAffected, long RowId);
+/// <param name="RowsChanged">
+/// Every row that the statement changed, including the rows that an <c>ON DELETE CASCADE</c> removed
+/// and the rows that a trigger wrote. This is the number that <c>maxRows</c> bounds and the number
+/// that the write budget counts.
+/// </param>
+public sealed record StructuredWriteResult(int RowsAffected, long RowId, int RowsChanged);
+
+/// <summary>
+/// The write changed, or would change, more rows than the effective limit. Nothing was committed.
+/// </summary>
+/// <param name="Check">
+/// <c>pre</c> when the bounded pre-count rejected the filter, <c>post</c> when the executed statement
+/// changed too many rows and rolled back. The agent never sees this: the next action is the same in
+/// both cases. It reaches the log, thus an operator can tell the two apart.
+/// </param>
+/// <param name="Limit">The effective limit that the operation passed.</param>
+internal sealed class WriteLimitExceededException(string check, int limit)
+    : Exception($"The write passed the effective limit of {limit} rows at the {check} check.")
+{
+    public string Check { get; } = check;
+
+    public int Limit { get; } = limit;
+
+    public const string PreCheck = "pre";
+
+    public const string PostCheck = "post";
+}
 
 /// <summary>
 /// Opens connections to the one database of the deployment and runs the server-authored
@@ -195,12 +221,17 @@ public sealed class SqliteService : IDisposable
         try
         {
             int rowsAffected;
+
+            // The budget counts every row that the statement wrote, thus a trigger on the table is
+            // charged too. An insert has no maxRows, so this count bounds nothing here.
+            var changesBefore = SqliteSecurity.TotalChanges(connection);
             await using (var command = connection.CreateCommand())
             {
                 StructuredWriteBuilder.Bind(command, statement);
                 rowsAffected = await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
             }
 
+            var rowsChanged = SqliteSecurity.TotalChanges(connection) - changesBefore;
             var rowId = SqliteSecurity.LastInsertRowId(connection);
 
             // Off before the commit: the policy denies transaction control, thus the server would
@@ -208,7 +239,145 @@ public sealed class SqliteService : IDisposable
             authorizer.Dispose();
             await RunServerStatementAsync(connection, "COMMIT;", token).ConfigureAwait(false);
 
-            return new StructuredWriteResult(rowsAffected, rowId);
+            return new StructuredWriteResult(rowsAffected, rowId, rowsChanged);
+        }
+        catch
+        {
+            authorizer.Dispose();
+            await RollbackQuietlyAsync(connection).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Changes the values of the rows that a filter selects. The server builds the statement.
+    /// </summary>
+    /// <exception cref="InvalidWriteException">The request shape, a name or a value is wrong.</exception>
+    /// <exception cref="WriteLimitExceededException">The write passed the effective limit.</exception>
+    public Task<StructuredWriteResult> UpdateAsync(
+        string table,
+        IReadOnlyDictionary<string, JsonElement> values,
+        IReadOnlyList<WriteCondition> where,
+        int maxRows,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+
+        return MutateAsync(
+            table,
+            where,
+            maxRows,
+            schema => StructuredWriteBuilder.BuildUpdate(schema, values, where),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes the rows that a filter selects. The server builds the statement.
+    /// </summary>
+    /// <exception cref="InvalidWriteException">The request shape, a name or a value is wrong.</exception>
+    /// <exception cref="WriteLimitExceededException">The write passed the effective limit.</exception>
+    public Task<StructuredWriteResult> DeleteAsync(
+        string table,
+        IReadOnlyList<WriteCondition> where,
+        int maxRows,
+        CancellationToken cancellationToken)
+        => MutateAsync(
+            table,
+            where,
+            maxRows,
+            schema => StructuredWriteBuilder.BuildDelete(schema, where),
+            cancellationToken);
+
+    /// <summary>
+    /// Runs one bounded structured <c>UPDATE</c> or <c>DELETE</c> inside one transaction.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The step order is the same security contract as <see cref="InsertAsync"/>: the identifier
+    /// validation runs a <c>PRAGMA</c> and <c>BEGIN IMMEDIATE</c> is transaction control, thus both
+    /// run before the authorizer goes on, and the authorizer comes off before the commit.
+    /// </para>
+    /// <para>
+    /// <b>Invariant.</b> Two independent checks bound the write, and both are necessary. The
+    /// pre-count protects the availability of the owning application: it rejects a broad filter
+    /// before the statement writes anything, holds the write lock or inflates the WAL. The
+    /// post-execution check protects data integrity: the owning application writes too, thus the row
+    /// count can change between the count and the write. See
+    /// <c>.lode/database/structured-writes.md</c>.
+    /// </para>
+    /// <para>
+    /// <b>Invariant.</b> A <c>LIMIT</c> on the write statement is not a substitute for either check.
+    /// A <c>LIMIT</c> writes a partial result silently, which is worse for an agent than a clean
+    /// rejection.
+    /// </para>
+    /// <para>
+    /// The pre-count is a <c>SELECT</c> and it runs with the authorizer installed.
+    /// <see cref="AuthorizerPolicy.Write"/> permits <c>SQLITE_SELECT</c> and <c>SQLITE_READ</c> for
+    /// exactly this reason.
+    /// </para>
+    /// </remarks>
+    private async Task<StructuredWriteResult> MutateAsync(
+        string table,
+        IReadOnlyList<WriteCondition> where,
+        int maxRows,
+        Func<TableSchema, StructuredStatement> build,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(where);
+
+        // The deployment cap always wins. A caller cannot raise its own bound.
+        var effectiveLimit = Math.Min(maxRows, _options.MaxWriteRows);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(_options.QueryTimeoutSeconds));
+        var token = timeout.Token;
+
+        await using var connection = await OpenReadWriteAsync(token).ConfigureAwait(false);
+        using var interrupt = SqliteSecurity.RegisterInterrupt(connection, token);
+
+        var schema = await StructuredWriteBuilder.ReadTableSchemaAsync(connection, table, token).ConfigureAwait(false);
+        var statement = build(schema);
+        var preCount = StructuredWriteBuilder.BuildPreCount(schema, where, effectiveLimit + 1);
+
+        await RunServerStatementAsync(connection, "BEGIN IMMEDIATE;", token).ConfigureAwait(false);
+        var authorizer = SqliteSecurity.InstallAuthorizer(connection, AuthorizerPolicy.Write);
+        try
+        {
+            long matched;
+            await using (var command = connection.CreateCommand())
+            {
+                StructuredWriteBuilder.Bind(command, preCount);
+                matched = Convert.ToInt64(
+                    await command.ExecuteScalarAsync(token).ConfigureAwait(false),
+                    System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (matched > effectiveLimit)
+            {
+                throw new WriteLimitExceededException(WriteLimitExceededException.PreCheck, effectiveLimit);
+            }
+
+            int rowsAffected;
+            var changesBefore = SqliteSecurity.TotalChanges(connection);
+            await using (var command = connection.CreateCommand())
+            {
+                StructuredWriteBuilder.Bind(command, statement);
+                rowsAffected = await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }
+
+            // Not the ExecuteNonQuery count: a cascade and a trigger also change rows, and those rows
+            // are what the limit must bound.
+            var rowsChanged = SqliteSecurity.TotalChanges(connection) - changesBefore;
+            if (rowsChanged > effectiveLimit)
+            {
+                throw new WriteLimitExceededException(WriteLimitExceededException.PostCheck, effectiveLimit);
+            }
+
+            authorizer.Dispose();
+            await RunServerStatementAsync(connection, "COMMIT;", token).ConfigureAwait(false);
+
+            return new StructuredWriteResult(rowsAffected, 0, rowsChanged);
         }
         catch
         {

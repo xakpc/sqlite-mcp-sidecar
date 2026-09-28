@@ -171,7 +171,7 @@ for an unbounded time.
 
 ## Related
 
-- [structured-writes.md](structured-writes.md)
+- [../../database/structured-writes.md](../../database/structured-writes.md)
 - [write-idempotency.md](write-idempotency.md)
 - [sqlite-sandbox.md](../../database/sqlite-sandbox.md)
 - [../../security/permissions.md](../../security/permissions.md)

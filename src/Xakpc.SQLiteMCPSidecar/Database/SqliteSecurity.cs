@@ -233,6 +233,39 @@ internal static class SqliteSecurity
         return raw.sqlite3_last_insert_rowid(handle);
     }
 
+    /// <summary>
+    /// Reads the number of rows that every statement on this connection has changed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Invariant.</b> This is the count that bounds a structured write, and not the count that
+    /// <c>ExecuteNonQuery</c> returns. <c>ExecuteNonQuery</c> reports the rows of the target table
+    /// only, while this counter also includes the rows that an <c>ON DELETE CASCADE</c> removes and
+    /// the rows that a trigger writes. Those rows are real damage, and the connection sets
+    /// <c>ForeignKeys = true</c>, thus a <c>delete</c> with <c>maxRows = 1</c> would otherwise destroy
+    /// a whole subtree and report one row. See
+    /// <c>.lode/decisions/0004-maxrows-bounds-total-changes.md</c>.
+    /// </para>
+    /// <para>
+    /// The value is cumulative for the lifetime of the connection, thus a caller uses the difference
+    /// across one statement. Pooling is off and a write opens its own connection, so that difference
+    /// belongs to the one statement that ran.
+    /// </para>
+    /// <para>
+    /// Like <see cref="LastInsertRowId"/> it reads connection state and runs no statement, thus it
+    /// also works while an authorizer is installed.
+    /// </para>
+    /// </remarks>
+    public static int TotalChanges(SqliteConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        var handle = connection.Handle
+            ?? throw new InvalidOperationException("The connection is not open, thus it has no handle.");
+
+        return raw.sqlite3_total_changes(handle);
+    }
+
     private static void Check(int result, sqlite3 handle, string what)
     {
         if (result != raw.SQLITE_OK)

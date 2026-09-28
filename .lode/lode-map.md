@@ -62,7 +62,7 @@ moves out of `plans/design/` when code implements it, and it is rewritten as cur
 | --- | --- |
 | [database/connections.md](database/connections.md) | The read-only connection, the write connection and `ForeignKeys`, `query_only`, pooling off, where the sandbox applies, the request and write semaphores, the filesystem constraints. |
 | [database/sqlite-sandbox.md](database/sqlite-sandbox.md) | The always-on SQLite controls, the verified native API, the two allowlist policies, runtime limits, the one-statement rule, hard boundaries, cancellation. |
-| [database/structured-writes.md](database/structured-writes.md) | Why the server builds the statement, the order of an insert, identifier validation, the value table, the result shape. |
+| [database/structured-writes.md](database/structured-writes.md) | Why the server builds the statement, the three tools, the flat filter model, the order of an insert and of a mutation, the two row-limit checks, identifier validation, the value table, the result shapes. |
 
 ## mcp/
 
@@ -88,6 +88,8 @@ trade-off.
 | [decisions/0001-no-undo-in-mvp.md](decisions/0001-no-undo-in-mvp.md) | The MVP has no undo for a delete. Why the automatic backup before delete is gone. |
 | [decisions/0002-write-is-a-whole-database-grant.md](decisions/0002-write-is-a-whole-database-grant.md) | No table allowlist. A permission applies to each table. |
 | [decisions/0003-mandatory-idempotency-key.md](decisions/0003-mandatory-idempotency-key.md) | Each write tool needs `requestId`. Why failures are not cached. |
+| [decisions/0004-maxrows-bounds-total-changes.md](decisions/0004-maxrows-bounds-total-changes.md) | `maxRows` counts a cascade and a trigger, not the target table alone. Why `ExecuteNonQuery` is the wrong count. |
+| [decisions/0005-and-only-filter.md](decisions/0005-and-only-filter.md) | The structured filter joins with `AND` only. Why N calls bound tighter than one `or`. |
 
 ## plans/
 
@@ -107,7 +109,6 @@ Target design for what has no code. One topic for each file.
 | [security-model.md](plans/design/security-model.md) | The layered security model, the guarantees list, the non-guarantees list. Start here. |
 | [threat-model.md](plans/design/threat-model.md) | Agent mistakes, mitigation map, the mistake that the MVP does not mitigate, attacker goals and blocks, logging and errors as leak surfaces. |
 | [connection-policy.md](plans/design/connection-policy.md) | The backup connections and the backup semaphore. Everything else is current state. |
-| [structured-writes.md](plans/design/structured-writes.md) | What Phase 4b owes: `update`, `delete`, the flat filter model, the bounded pre-count, the row-limit rollback. |
 | [write-idempotency.md](plans/design/write-idempotency.md) | Only the scope table: which tools take `requestId`. The rest is current state. |
 | [raw-writes.md](plans/design/raw-writes.md) | `execute_write_sql`, what the permission bypasses and what it does not, results, budget accounting, no remote transactions. |
 | [backups.md](plans/design/backups.md) | The background backup, partial files, the runaway cap, `backup_status`, path safety, and the `diagnostics` tool. |
@@ -131,7 +132,7 @@ documents go here.
 | Touch authentication | `security/authentication.md`, `security/permissions.md` |
 | Touch an endpoint, a path or a rate limit | `security/public-endpoint.md`, `plans/design/platform-deployment.md` |
 | Touch configuration | `configuration/options.md` |
-| Touch a write path | `database/structured-writes.md`, `security/write-controls.md`, then `plans/design/structured-writes.md` for what 4b still owes |
+| Touch a write path | `database/structured-writes.md`, `security/write-controls.md`, `decisions/0004-maxrows-bounds-total-changes.md` |
 | Write documentation | `plans/design/security-model.md`, `security/permissions.md`, `plans/design/raw-writes.md`, `decisions/` |
 | Touch the container or the launch configuration | `plans/design/container-and-deployment.md`, `testing/e2e-harness.md` |
 | Consider a new feature | `plans/out-of-scope.md`, `decisions/` |

@@ -43,8 +43,9 @@ The budget is first on purpose: it counts a request with a wrong token too, thus
 the log. See [public-endpoint.md](public-endpoint.md).
 
 Every layer above `ro` applies to caller SQL. The write branch adds to this stack and replaces no part
-of it: the baseline and the authorizer apply to the write connection too. The bounded pre-count and the
-row-limit rollback arrive with `update` and `delete` in Phase 4b. See
+of it: the baseline and the authorizer apply to the write connection too. `update` and `delete` add
+the bounded pre-count and the row-limit rollback on top, and that limit counts every row the write
+changes, a cascade and a trigger included. See
 [../database/structured-writes.md](../database/structured-writes.md).
 
 ## Related

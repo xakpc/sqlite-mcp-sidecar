@@ -31,6 +31,14 @@ occurred invoking 'insert'."`. The agent gets no code to select from, and the re
 "write without requestId -> `InvalidWrite`" cannot pass.
 `WriteIdempotencyTests.AnAbsentRequestIdIsInvalidWrite` fails if the defaults are removed.
 
+**`query` follows the same rule.** `string? sql = null` plus a required check in the method. It was
+the one tool that did not, and an agent that forgot `sql` therefore got the masked message and no
+code.
+
+**The `= null` rule covers an absent argument and not a wrong type.** An argument of the wrong JSON
+type fails inside the binder, where no default helps, and the SDK masks that message the same way.
+`ArgumentBindingFilter` is what owns that half. See below.
+
 The cost is that the generated JSON schema marks **no** argument as required:
 
 ```json
@@ -80,6 +88,42 @@ controls — deduplication, budget, request slot, write slot, execute, charge, c
 cannot drift between one tool and another. Each tool method owns only its own shape validation and its
 result format.
 
+
+## The binding filter owns the wrong-type half
+
+Code: `src/Xakpc.SQLiteMCPSidecar/Mcp/ArgumentBindingFilter.cs`, registered in `Program.cs` with
+`AddCallToolFilter`.
+
+The binder runs **before** a tool method, thus an argument of the wrong JSON type never reaches one
+and no `= null` default can help. The filter catches the `JsonException` and answers with
+`InvalidWrite`, or with `InvalidQuery` for `query`.
+
+```mermaid
+flowchart TD
+    call[tools/call] --> filter[ArgumentBindingFilter]
+    filter --> bind{Binder converts each argument}
+    bind -->|ok| tool[Tool method: validates, returns a code]
+    bind -->|JsonException| code[InvalidWrite or InvalidQuery]
+    filter --> code
+```
+
+**Only `JsonException`.** Every other exception belongs to the tool, which catches its own and
+returns a code, thus catching more here would hide a real defect behind a caller-mistake code.
+
+**Why a filter and not `JsonElement` arguments.** Declaring every argument as `JsonElement` and
+converting by hand also returns a code, and it was built first and then discarded: it costs the JSON
+schema. `where` stops describing the condition object, which is the one machine-readable account of
+the shape the agent has to build, and
+`UpdateToolTests.TheFilterArgumentHasAUsableSchema` is what caught the loss. The filter keeps the
+rich schema for the agent that reads it and gives a code to the agent that ignored it, and it covers
+each tool added later with no per-argument work.
+
+The trade is that the message names the **tool** and not the argument: the binder converts each
+argument on its own and the exception carries the path `$`. The description and the schema carry the
+shape of each argument, thus the agent has what it needs to find the wrong one.
+
+The exception message can quote the JSON that failed to convert, and a caller value is row data, thus
+it reaches the log only and the caller gets fixed text.
 
 ## Related
 

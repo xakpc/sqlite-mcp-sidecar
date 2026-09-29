@@ -460,7 +460,9 @@ public sealed class SqliteService : IDisposable
         // Before the transaction: a rejected statement must not take the write lock.
         using (SqliteSecurity.InstallAuthorizer(connection, AuthorizerPolicy.Dml))
         {
-            var check = SqliteSecurity.ValidateSingleStatement(connection, sql);
+            // mustWrite: this tool exists to write. A bare SELECT is the caller using the wrong tool,
+            // and accepting it would hold the write lock for a statement that changes nothing.
+            var check = SqliteSecurity.ValidateSingleStatement(connection, sql, mustWrite: true);
             if (check != StatementCheck.Ok)
             {
                 throw new StatementRejectedException(check);

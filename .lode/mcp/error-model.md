@@ -39,14 +39,14 @@ with this code. The outcome is the same and the agent must stop. See
 | --- | --- | --- | --- |
 | `Unauthorized` | Missing or wrong bearer token. | Stop. | `401`, before a tool |
 | `PermissionDenied` | The deployment does not have the permission. | Stop. Do not retry. | SDK message |
-| `InvalidQuery` | Malformed SQL, an unknown name, more than one statement, or an absent statement. | Correct the statement. | `query`, `execute_write_sql` |
+| `InvalidQuery` | Malformed SQL, an unknown name, more than one statement, an absent or empty statement, or a `query` argument of the wrong JSON type. | Correct the statement. | `query`, `execute_write_sql` |
 | `QueryRejected` | The authorizer rejected an action. | Stop. The action is not available. | `query`, `execute_write_sql` |
 | `QueryTimedOut` | Execution passed the query timeout. | Make the query smaller. | `query`, `schema`, every write tool |
 | `ResultTooLarge` | One single row is larger than the byte budget. | Select fewer columns. | `query` only |
-| `InvalidWrite` | An invalid `requestId`, an absent `sql`, an unknown table or column, a value with no SQLite equivalent, a constraint violation, a missing or empty `where`, a missing `maxRows`, or a malformed condition. | Correct the request. | every write tool |
+| `InvalidWrite` | An invalid `requestId`, an absent `sql`, an argument of the wrong JSON type, an unknown table or column, a value with no SQLite equivalent, a constraint violation, a missing or empty `where`, a missing `maxRows`, or a malformed condition. | Correct the request. | every write tool |
 | `WriteLimitExceeded` | The write would change more rows than the effective limit, counting a cascade and a trigger. Nothing changed. | Narrow the filter. | `update`, `delete` |
 | `WriteBudgetExceeded` | The per-minute write budget is empty. | Wait, then retry with the same `requestId`. | every write tool |
-| `DatabaseBusy` | The busy timeout expired, or the write slot did not free. | Retry later with the same `requestId`. | `query`, and every write tool |
+| `DatabaseBusy` | The busy timeout expired, the write slot did not free, or the same `requestId` is already running on another call. | Retry later with the same `requestId`. | `query`, and every write tool |
 | `DatabaseError` | Any other SQLite failure. | Report to the operator. | `query`, `schema`, and every write tool |
 | `BackupFailed` | The label is invalid, a backup is in progress, or the copy failed. | Report to the operator. | `backup` |
 
@@ -98,9 +98,10 @@ flowchart TD
     w[Write request] --> shape{Shape}
     shape -->|"absent requestId, over 128 chars, absent table, empty values, absent or empty where, absent maxRows"| iw[InvalidWrite]
     shape -->|ok| dedup{requestId in the cache?}
-    dedup -->|same payload| rep[Return the stored response]
+    dedup -->|same payload, committed| rep[Return the stored response]
+    dedup -->|same payload, still running| db
     dedup -->|different payload| iw
-    dedup -->|no| bud{Budget left?}
+    dedup -->|"no, reserve it"| bud{Budget left?}
     bud -->|no| wb[WriteBudgetExceeded]
     bud -->|yes| ident{Table and columns exist?}
     ident -->|no, or a view| iw
@@ -156,13 +157,31 @@ make the instruction "retry later" incorrect.
 `WriteIdempotencyTests.ARequestIdThatFailedStaysUsable` proves it. See
 [../security/write-controls.md](../security/write-controls.md).
 
-## An absent argument must reach this model
+## A malformed argument must reach this model
 
-**Lesson.** A mandatory tool argument needs `= null` in the signature and validation in the method
-body. A nullable type alone is not enough: the binder of the SDK treats a parameter with no default
-value as required and throws, and the SDK then masks the message the same way it masks a thrown
-exception. The agent gets `"An error occurred invoking 'insert'."` and no code. See
-[tool-catalog.md](tool-catalog.md).
+The model owns **every** failure that an agent can cause. Two mechanisms are needed, because an
+argument can go wrong in two places and neither one is the tool body.
+
+**An absent argument: `= null` plus validation in the method.** A nullable type alone is not enough:
+the binder of the SDK treats a parameter with no default value as required and throws, and the SDK
+then masks the message the same way it masks a thrown exception. The agent gets `"An error occurred
+invoking 'insert'."` and no code. `query` was the last tool without the default and it has one now.
+See [tool-catalog.md](tool-catalog.md).
+
+**A wrong JSON type: the binding filter.** No default helps there, because the conversion itself is
+what fails, and it fails before the method runs. `ArgumentBindingFilter` wraps `tools/call`, catches
+the `JsonException` and answers `InvalidQuery` for `query` or `InvalidWrite` for a write tool. It
+names the tool and not the argument, because the binder converts each argument on its own and the
+exception carries the path `$`. See
+[write-tool-arguments.md](write-tool-arguments.md).
+
+**Lesson.** A corpus of malformed calls is what found the second half; no build warning reports it
+and every hand-written test built correctly typed arguments through a helper, which silently
+corrected the mistake. See [../testing/bad-agent-suite.md](../testing/bad-agent-suite.md).
+
+A refusal that the protocol layer makes before either mechanism, an unknown tool name or the
+authorization filter, carries no code of this model and says so in plain words: `Unknown tool:
+'drop_database'` and `Access forbidden: This tool requires authorization.`
 
 ## Disclosure rules
 

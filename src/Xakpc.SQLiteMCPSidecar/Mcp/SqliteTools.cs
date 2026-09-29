@@ -73,12 +73,25 @@ public sealed partial class SqliteTools(
                + "'truncated' flag states whether the sidecar stopped at a limit.")]
     [Authorize(Policy = "perm:read")]
     public async Task<CallToolResult> QueryAsync(
-        [Description("One read-only SQL statement, with no trailing second statement. "
+        [Description("One read-only SQL statement, as a string, with no trailing second statement. "
                    + "Write literal values into the statement; there is no parameter list.")]
-        string sql,
-        CancellationToken cancellationToken)
+        string? sql = null,
+        CancellationToken cancellationToken = default)
     {
         var started = TimeProvider.System.GetTimestamp();
+
+        // The `= null` lesson applies here too, and it was missing: with no default the binder throws
+        // for an absent argument and the SDK masks the message, thus an agent that forgot `sql` got
+        // no error code at all. Shape validation runs before the request slot, because a malformed
+        // request must not occupy one.
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            LogCompleted(logger, "query", Elapsed(started), nameof(SidecarError.InvalidQuery));
+            return SidecarErrors.Failure(
+                SidecarError.InvalidQuery,
+                "The sql value is required. Send exactly one read-only SQL statement as a string.");
+        }
+
         using var slot = await database.AcquireRequestSlotAsync(cancellationToken).ConfigureAwait(false);
 
         try
@@ -103,7 +116,8 @@ public sealed partial class SqliteTools(
                 StatementCheck.MultipleStatements => (SidecarError.InvalidQuery,
                     "The request holds more than one statement. Send exactly one."),
                 StatementCheck.Empty => (SidecarError.InvalidQuery,
-                    "The request holds no statement."),
+                    "The request holds no statement. Send one SELECT; whitespace and a comment alone "
+                  + "are not a query."),
                 StatementCheck.Rejected => (SidecarError.QueryRejected,
                     "The requested action is not permitted. Only read statements are available."),
                 // The statement is correct and the database is locked. Same code that the execution
@@ -152,11 +166,12 @@ public sealed partial class SqliteTools(
                + "One call adds one row; call it again for another row.")]
     [Authorize(Policy = "perm:write")]
     public async Task<CallToolResult> InsertAsync(
-        [Description("A unique identifier for this write, at most 128 characters. Send the SAME value "
-                   + "when you retry a call that failed or timed out: the row is then added one time "
-                   + "only. Use a NEW value for new work.")]
+        [Description("A unique identifier for this write, as a string, at most 128 characters. Send "
+                   + "the SAME value when you retry a call that failed or timed out: the row is then "
+                   + "added one time only. Use a NEW value for new work.")]
         string? requestId = null,
-        [Description("The table to add the row to. It must be a table from the schema tool, not a view.")]
+        [Description("The table to add the row to, as a string. It must be a table from the schema "
+                   + "tool, not a view.")]
         string? table = null,
         [Description("The row, as an object of column name to value. A value is a string, a number, a "
                    + "boolean or null. Omit a column to accept its default.")]
@@ -202,24 +217,26 @@ public sealed partial class SqliteTools(
                + "The filter is required: there is no way to change every row of a table.")]
     [Authorize(Policy = "perm:write")]
     public async Task<CallToolResult> UpdateAsync(
-        [Description("A unique identifier for this write, at most 128 characters. Send the SAME value "
-                   + "when you retry a call that failed or timed out: the change is then applied one "
-                   + "time only. Use a NEW value for new work.")]
+        [Description("A unique identifier for this write, as a string, at most 128 characters. Send "
+                   + "the SAME value when you retry a call that failed or timed out: the change is "
+                   + "then applied one time only. Use a NEW value for new work.")]
         string? requestId = null,
-        [Description("The table to change. It must be a table from the schema tool, not a view.")]
+        [Description("The table to change, as a string. It must be a table from the schema tool, not "
+                   + "a view.")]
         string? table = null,
         [Description("The new values, as an object of column name to value. A value is a string, a "
                    + "number, a boolean or null. Only the named columns change.")]
         Dictionary<string, JsonElement>? values = null,
-        [Description("The filter, as a list of conditions joined with AND. Each condition has a "
-                   + "column, an operator and, for a comparison, a value. The operators are "
-                   + "eq, ne, lt, lte, gt, gte, is-null and is-not-null; the last two take no value. "
-                   + "At least one condition is required.")]
+        [Description("The filter, as a LIST of condition objects joined with AND, never a SQL string. "
+                   + "Each condition has a column, an operator and, for a comparison, a value. The "
+                   + "operators are eq, ne, lt, lte, gt, gte, is-null and is-not-null; the last two "
+                   + "take no value. At least one condition is required.")]
         List<WriteCondition>? where = null,
-        [Description("The most rows this call may change. The call is rejected and nothing changes if "
-                   + "the filter matches more. This counts EVERY row the write touches, including "
-                   + "rows a trigger writes, so it can be larger than the number of rows the filter "
-                   + "selects. The deployment also sets its own cap, and the lower of the two wins.")]
+        [Description("The most rows this call may change, as a whole number. The call is rejected and "
+                   + "nothing changes if the filter matches more. This counts EVERY row the write "
+                   + "touches, including rows a trigger writes, so it can be larger than the number "
+                   + "of rows the filter selects. The deployment also sets its own cap, and the lower "
+                   + "of the two wins.")]
         int? maxRows = null,
         CancellationToken cancellationToken = default)
     {
@@ -267,22 +284,23 @@ public sealed partial class SqliteTools(
                + "ON DELETE CASCADE, so read the schema and count those rows into maxRows.")]
     [Authorize(Policy = "perm:write")]
     public async Task<CallToolResult> DeleteAsync(
-        [Description("A unique identifier for this write, at most 128 characters. Send the SAME value "
-                   + "when you retry a call that failed or timed out: the rows are then removed one "
-                   + "time only. Use a NEW value for new work.")]
+        [Description("A unique identifier for this write, as a string, at most 128 characters. Send "
+                   + "the SAME value when you retry a call that failed or timed out: the rows are "
+                   + "then removed one time only. Use a NEW value for new work.")]
         string? requestId = null,
-        [Description("The table to remove rows from. It must be a table from the schema tool, not a view.")]
+        [Description("The table to remove rows from, as a string. It must be a table from the schema "
+                   + "tool, not a view.")]
         string? table = null,
-        [Description("The filter, as a list of conditions joined with AND. Each condition has a "
-                   + "column, an operator and, for a comparison, a value. The operators are "
-                   + "eq, ne, lt, lte, gt, gte, is-null and is-not-null; the last two take no value. "
-                   + "At least one condition is required.")]
+        [Description("The filter, as a LIST of condition objects joined with AND, never a SQL string. "
+                   + "Each condition has a column, an operator and, for a comparison, a value. The "
+                   + "operators are eq, ne, lt, lte, gt, gte, is-null and is-not-null; the last two "
+                   + "take no value. At least one condition is required.")]
         List<WriteCondition>? where = null,
-        [Description("The most rows this call may remove. The call is rejected and nothing changes if "
-                   + "the filter matches more. This counts EVERY row the write removes, including "
-                   + "rows removed in other tables by ON DELETE CASCADE, so deleting one row that has "
-                   + "three cascading children needs a maxRows of at least 4. The deployment also "
-                   + "sets its own cap, and the lower of the two wins.")]
+        [Description("The most rows this call may remove, as a whole number. The call is rejected and "
+                   + "nothing changes if the filter matches more. This counts EVERY row the write "
+                   + "removes, including rows removed in other tables by ON DELETE CASCADE, so "
+                   + "deleting one row that has three cascading children needs a maxRows of at least "
+                   + "4. The deployment also sets its own cap, and the lower of the two wins.")]
         int? maxRows = null,
         CancellationToken cancellationToken = default)
     {
@@ -329,13 +347,13 @@ public sealed partial class SqliteTools(
                + "limit and byte limit as a query.")]
     [Authorize(Policy = "perm:danger-raw-write")]
     public async Task<CallToolResult> ExecuteWriteSqlAsync(
-        [Description("A unique identifier for this write, at most 128 characters. Send the SAME value "
-                   + "when you retry a call that failed or timed out: the statement then runs one time "
-                   + "only. Use a NEW value for new work.")]
+        [Description("A unique identifier for this write, as a string, at most 128 characters. Send "
+                   + "the SAME value when you retry a call that failed or timed out: the statement "
+                   + "then runs one time only. Use a NEW value for new work.")]
         string? requestId = null,
-        [Description("One INSERT, UPDATE or DELETE statement, with no trailing second statement. "
-                   + "Write literal values into the statement. CTEs, subqueries, conflict clauses and "
-                   + "RETURNING are available.")]
+        [Description("One INSERT, UPDATE or DELETE statement, as a string, with no trailing second "
+                   + "statement. Write literal values into the statement. CTEs, subqueries, conflict "
+                   + "clauses and RETURNING are available.")]
         string? sql = null,
         CancellationToken cancellationToken = default)
     {
@@ -577,98 +595,130 @@ public sealed partial class SqliteTools(
                 return SidecarErrors.Failure(
                     SidecarError.InvalidWrite,
                     "This requestId was used for different work. Use a new requestId for new work.");
+
+            case DeduplicationOutcome.InFlight:
+                // The same request is already running. Executing it here would apply the write a
+                // second time, which is the failure the requestId exists to prevent. DatabaseBusy is
+                // the honest code: the work is under way and the retry it asks for is correct.
+                logCompleted(Elapsed(started), 0, false, nameof(SidecarError.DatabaseBusy));
+                return SidecarErrors.Failure(
+                    SidecarError.DatabaseBusy,
+                    "This requestId is already running. Wait, then retry with the same requestId.");
         }
 
-        if (!writeBudget.HasCapacity())
-        {
-            logCompleted(Elapsed(started), 0, false, nameof(SidecarError.WriteBudgetExceeded));
-            return SidecarErrors.Failure(
-                SidecarError.WriteBudgetExceeded,
-                "The write budget for this minute is used up. Wait, then retry with the same requestId.");
-        }
-
-        using var slot = await database.AcquireRequestSlotAsync(cancellationToken).ConfigureAwait(false);
-        using var writeSlot = await database.TryAcquireWriteSlotAsync(cancellationToken).ConfigureAwait(false);
-        if (writeSlot is null)
-        {
-            logCompleted(Elapsed(started), 0, false, nameof(SidecarError.DatabaseBusy));
-            return SidecarErrors.Failure(SidecarError.DatabaseBusy, ExplanationFor(SidecarError.DatabaseBusy));
-        }
-
+        // INVARIANT: the Check above reserved the identifier, thus this method owns it from here and
+        // every path that does not commit must release it. A leaked reservation would answer
+        // DatabaseBusy for the whole five minute window and make its own "retry" instruction
+        // impossible to follow.
+        var committed = false;
         try
         {
-            var result = await execute(cancellationToken).ConfigureAwait(false);
-
-            // Committed rows only, and only after the commit. A cascaded row and a row that a trigger
-            // wrote are real write volume, thus the budget counts RowsChanged and not RowsAffected.
-            writeBudget.Record(result.RowsChanged);
-
-            var text = format(result);
-            deduplication.Store(key, payloadHash, text);
-
-            logCompleted(Elapsed(started), result.RowsAffected, false, "ok");
-            return SidecarErrors.Success(text);
-        }
-        catch (WriteLimitExceededException exception)
-        {
-            // One code for both checks: nothing changed either way, and the correct next action is the
-            // same. The log carries which check fired, because that is operator information.
-            LogWriteLimitRejected(logger, tool, exception.Check, exception.Limit);
-            logCompleted(Elapsed(started), 0, false, nameof(SidecarError.WriteLimitExceeded));
-            return SidecarErrors.Failure(
-                SidecarError.WriteLimitExceeded,
-                $"The write would change more rows than the limit of {exception.Limit}, counting every "
-              + "row that a cascade or a trigger also changes. Nothing changed. Narrow the filter.");
-        }
-        catch (InvalidWriteException exception)
-        {
-            // The message names only what the caller already sent. It carries no value and no path.
-            logCompleted(Elapsed(started), 0, false, nameof(SidecarError.InvalidWrite));
-            return SidecarErrors.Failure(SidecarError.InvalidWrite, exception.Message);
-        }
-        catch (StatementRejectedException exception)
-        {
-            // Only execute_write_sql reaches this: a structured write sends no caller SQL. The mapping
-            // is the one that the query tool uses, thus one statement kind gives one code everywhere.
-            var (code, explanation) = exception.Check switch
+            if (!writeBudget.HasCapacity())
             {
-                StatementCheck.MultipleStatements => (SidecarError.InvalidQuery,
-                    "The request holds more than one statement. Send exactly one."),
-                StatementCheck.Empty => (SidecarError.InvalidQuery,
-                    "The request holds no statement."),
-                StatementCheck.Rejected => (SidecarError.QueryRejected,
-                    "The requested action is not permitted. Only INSERT, UPDATE and DELETE are available."),
-                StatementCheck.Busy => (SidecarError.DatabaseBusy,
-                    ExplanationFor(SidecarError.DatabaseBusy)),
-                _ => (SidecarError.InvalidQuery,
-                    "The statement did not compile. Check the syntax and the table and column names."),
-            };
+                logCompleted(Elapsed(started), 0, false, nameof(SidecarError.WriteBudgetExceeded));
+                return SidecarErrors.Failure(
+                    SidecarError.WriteBudgetExceeded,
+                    "The write budget for this minute is used up. Wait, then retry with the same requestId.");
+            }
 
-            logCompleted(Elapsed(started), 0, false, code.ToString());
-            return SidecarErrors.Failure(code, explanation);
-        }
-        catch (SqliteException exception)
-        {
-            var code = exception.SqliteErrorCode switch
+            using var slot = await database.AcquireRequestSlotAsync(cancellationToken).ConfigureAwait(false);
+            using var writeSlot = await database.TryAcquireWriteSlotAsync(cancellationToken).ConfigureAwait(false);
+            if (writeSlot is null)
             {
-                SqliteConstraint => SidecarError.InvalidWrite,
-                SqliteAuthorizationDenied => SidecarError.QueryRejected,
-                SqliteInterrupt => SidecarError.QueryTimedOut,
-                SqliteBusy or SqliteLocked => SidecarError.DatabaseBusy,
-                SqliteReadOnly => SidecarError.DatabaseError,
-                _ => SidecarError.DatabaseError,
-            };
+                logCompleted(Elapsed(started), 0, false, nameof(SidecarError.DatabaseBusy));
+                return SidecarErrors.Failure(SidecarError.DatabaseBusy, ExplanationFor(SidecarError.DatabaseBusy));
+            }
 
-            LogFailed(logger, tool, code.ToString(), exception);
-            return SidecarErrors.Failure(code, ExplanationFor(code));
+            try
+            {
+                var result = await execute(cancellationToken).ConfigureAwait(false);
+
+                // Committed rows only, and only after the commit. A cascaded row and a row that a trigger
+                // wrote are real write volume, thus the budget counts RowsChanged and not RowsAffected.
+                writeBudget.Record(result.RowsChanged);
+
+                var text = format(result);
+                deduplication.Store(key, payloadHash, text);
+                committed = true;
+
+                logCompleted(Elapsed(started), result.RowsAffected, false, "ok");
+                return SidecarErrors.Success(text);
+            }
+            catch (WriteLimitExceededException exception)
+            {
+                // One code for both checks: nothing changed either way, and the correct next action is the
+                // same. The log carries which check fired, because that is operator information.
+                LogWriteLimitRejected(logger, tool, exception.Check, exception.Limit);
+                logCompleted(Elapsed(started), 0, false, nameof(SidecarError.WriteLimitExceeded));
+                return SidecarErrors.Failure(
+                    SidecarError.WriteLimitExceeded,
+                    $"The write would change more rows than the limit of {exception.Limit}, counting every "
+                  + "row that a cascade or a trigger also changes. Nothing changed. Narrow the filter.");
+            }
+            catch (InvalidWriteException exception)
+            {
+                // The message names only what the caller already sent. It carries no value and no path.
+                logCompleted(Elapsed(started), 0, false, nameof(SidecarError.InvalidWrite));
+                return SidecarErrors.Failure(SidecarError.InvalidWrite, exception.Message);
+            }
+            catch (StatementRejectedException exception)
+            {
+                // Only execute_write_sql reaches this: a structured write sends no caller SQL. The mapping
+                // is the one that the query tool uses, thus one statement kind gives one code everywhere.
+                var (code, explanation) = exception.Check switch
+                {
+                    StatementCheck.MultipleStatements => (SidecarError.InvalidQuery,
+                        "The request holds more than one statement. Send exactly one."),
+                    StatementCheck.Empty => (SidecarError.InvalidQuery,
+                        "The request holds no statement. Send one INSERT, UPDATE or DELETE; whitespace "
+                      + "and a comment alone are not a statement."),
+                    StatementCheck.Rejected => (SidecarError.QueryRejected,
+                        "The requested action is not permitted. Only INSERT, UPDATE and DELETE are available."),
+                    // The statement is valid and it belongs to the other tool. Naming that tool is the
+                    // whole value of this code: the agent moves the call instead of rewriting the SQL.
+                    StatementCheck.ReadOnlyOnAWritePath => (SidecarError.QueryRejected,
+                        "The statement changes nothing. This tool runs one INSERT, UPDATE or DELETE. "
+                      + "Send a SELECT to the query tool instead."),
+                    StatementCheck.Busy => (SidecarError.DatabaseBusy,
+                        ExplanationFor(SidecarError.DatabaseBusy)),
+                    _ => (SidecarError.InvalidQuery,
+                        "The statement did not compile. Check the syntax and the table and column names."),
+                };
+
+                logCompleted(Elapsed(started), 0, false, code.ToString());
+                return SidecarErrors.Failure(code, explanation);
+            }
+            catch (SqliteException exception)
+            {
+                var code = exception.SqliteErrorCode switch
+                {
+                    SqliteConstraint => SidecarError.InvalidWrite,
+                    SqliteAuthorizationDenied => SidecarError.QueryRejected,
+                    SqliteInterrupt => SidecarError.QueryTimedOut,
+                    SqliteBusy or SqliteLocked => SidecarError.DatabaseBusy,
+                    SqliteReadOnly => SidecarError.DatabaseError,
+                    _ => SidecarError.DatabaseError,
+                };
+
+                LogFailed(logger, tool, code.ToString(), exception);
+                return SidecarErrors.Failure(code, ExplanationFor(code));
+            }
+            catch (OperationCanceledException)
+            {
+                // Nothing was committed, thus nothing is cached and a retry is correct.
+                logCompleted(Elapsed(started), 0, false, nameof(SidecarError.QueryTimedOut));
+                return SidecarErrors.Failure(
+                    SidecarError.QueryTimedOut,
+                    "The write passed the time limit and was stopped. Nothing changed. Retry with the same requestId.");
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // Nothing was committed, thus nothing is cached and a retry is correct.
-            logCompleted(Elapsed(started), 0, false, nameof(SidecarError.QueryTimedOut));
-            return SidecarErrors.Failure(
-                SidecarError.QueryTimedOut,
-                "The write passed the time limit and was stopped. Nothing changed. Retry with the same requestId.");
+            // Every path that did not commit ends the reservation here, the unexpected ones included.
+            if (!committed)
+            {
+                deduplication.Release(key);
+            }
         }
     }
 

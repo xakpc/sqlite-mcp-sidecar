@@ -45,6 +45,9 @@ documentation.
 - **write budget** — the rolling per-minute cap on total written rows for the sidecar **process**. It is not shared between processes. Do not confuse it with the **request budget**.
 - **`requestId`** — the mandatory idempotency key on each write tool. The same key returns the stored response of a committed write.
 - **replayed write** — a write request that the sidecar answered from the idempotency cache. It changed nothing.
+- **reservation** — the record that one `requestId` is running. `Check` takes it in the lock that reads the cache, and the caller ends it with `Store` on a commit or `Release` on every other path.
+- **in-flight** — the outcome for a second call that carries a `requestId` whose write has not committed. It answers `DatabaseBusy`, never a second write.
+- **binding filter** — `ArgumentBindingFilter`. It gives an error code to an argument of the wrong JSON type, which fails in the SDK binder before a tool method runs.
 
 ## Testing
 
@@ -53,6 +56,12 @@ documentation.
 - **external target** — a sidecar that already runs. `SIDECAR_E2E_URL`, `SIDECAR_E2E_TOKEN` and `SIDECAR_E2E_PERMISSIONS` select it.
 - **sample database** — the database that `Fixtures/sample-db.sql` builds. The test suite and the dev script share it.
 - **dev sidecar** — the live sidecar that `scripts/dev-sidecar.ps1` starts for a manual session.
+- **owning-application simulator** — `OwningApplication`. A second SQLite client that reads and writes the file while the sidecar does, on a scripted and seeded workload.
+- **invariant, not interleaving** — the rule of the live-database suite. A test asserts something that holds for every ordering, never on one ordering.
+- **corpus** — `Fixtures/bad-agent-corpus.json`. The malformed and hostile tool calls of the bad-agent suite, as data and not as C# literals.
+- **recorded gap** — a behaviour that the suite pins as it is today rather than as it should be, with a ticket. `rejected-opaque` and `accepted-gap` are the two kinds. A fix makes the test fail, thus the record must move. **No case carries one now:** all four gaps that the suites found are fixed.
+- **one-statement check** — see `ValidateSingleStatement`. It also answers `Empty` for a text that prepares to nothing, and `ReadOnlyOnAWritePath` for a statement that writes nothing on the raw write path.
+- **one-sided test** — a test that cannot fail while the defect is absent and can pass while it is present. It is named as such and it never stands alone.
 
 ## Public endpoint
 
@@ -101,7 +110,7 @@ documentation.
 
 - Permission detail: [security/permissions.md](security/permissions.md)
 - Public endpoint detail: [security/public-endpoint.md](security/public-endpoint.md)
-- Testing detail: [testing/e2e-harness.md](testing/e2e-harness.md)
+- Testing detail: [testing/e2e-harness.md](testing/e2e-harness.md), [testing/live-database-suite.md](testing/live-database-suite.md), [testing/bad-agent-suite.md](testing/bad-agent-suite.md)
 - Sandbox detail: [database/sqlite-sandbox.md](database/sqlite-sandbox.md)
 - Idempotency detail: [security/write-controls.md](security/write-controls.md)
 - Backup detail: [database/backups.md](database/backups.md)

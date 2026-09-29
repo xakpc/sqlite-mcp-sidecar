@@ -66,6 +66,11 @@ jobs:
       - name: Open the mount to the container user
         run: chmod -R 0777 build/dev
 
+      # The request budget is raised for this run and nothing else is. It is a per-process control and
+      # the whole suite shares one process here, thus the default 120 per minute rejects the bad-agent
+      # corpus with 429 before it asks the sidecar anything interesting. No coverage is lost:
+      # RateLimitTests owns the budget, it sets its own small value through the harness, and it is
+      # skipped against an external sidecar for exactly that reason.
       - name: Start the sidecar
         env:
           SIDECAR_PERMISSIONS: ${{ matrix.perms }}
@@ -78,6 +83,7 @@ jobs:
             -e SQLITE_SIDECAR_TOKEN=dev-token \
             -e SQLITE_SIDECAR_PERMISSIONS="$SIDECAR_PERMISSIONS" \
             -e SQLITE_SIDECAR_BACKUP_DIR=/backups \
+            -e SQLITE_SIDECAR_MAX_REQUESTS_PER_MINUTE=100000 \
             --read-only --tmpfs /tmp \
             --cap-drop=ALL --security-opt=no-new-privileges \
             sqlite-sidecar-mcp:ci

@@ -141,22 +141,29 @@ public sealed class SandboxBoundaryTests
     }
 
     /// <summary>
-    /// A rejected raw write leaves the rows alone. The statement is validated before
+    /// A rejected raw write leaves the table alone. The statement is validated before
     /// <c>BEGIN IMMEDIATE</c>, thus it never takes the write lock either.
     /// </summary>
+    /// <remarks>
+    /// It compares the schema and not a row count. A row count is not stable against an external
+    /// sidecar: one database serves the whole run and xunit runs test classes in parallel, thus
+    /// another class writes a row between the two reads. The schema is also the closer assertion, because
+    /// <c>DROP TABLE</c> is what this case sends.
+    /// </remarks>
     [Fact]
     public async Task ARejectedRawWriteChangesNothing()
     {
         await using var harness = SidecarHarness.Create(RawPermissions);
         await using var client = await harness.ConnectAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        var before = await QueryToolTests.CallQueryAsync(client, "SELECT count(*) AS n FROM jobs");
+        var before = await SchemaToolTests.CallSchemaAsync(client);
 
         var failure = await Record.ExceptionAsync(() => RawWriteToolTests.CallExecuteWriteSqlAsync(
             client, InsertToolTests.NewRequestId(), "DROP TABLE jobs"));
 
         Assert.NotNull(failure);
-        Assert.Equal(before, await QueryToolTests.CallQueryAsync(client, "SELECT count(*) AS n FROM jobs"));
+        Assert.Equal(before, await SchemaToolTests.CallSchemaAsync(client));
+        Assert.Contains("CREATE TABLE jobs", before, StringComparison.Ordinal);
     }
 
     /// <summary>

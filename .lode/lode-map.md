@@ -17,12 +17,12 @@ flowchart TD
     root --> dep[deployment/ — summary, container, platforms, distribution]
     root --> dbd[database/]
     root --> mcpd[mcp/]
-    root --> tst[testing/]
+    root --> tst[testing/ — e2e-harness, live-database-suite, bad-agent-suite]
     root --> dec[decisions/]
     root --> plans[plans/]
     root --> tmp[tmp/ — git-ignored]
-    dbd --> dbs[connections.md, sqlite-sandbox.md, structured-writes.md, raw-writes.md,
-                backups.md, diagnostics.md]
+    dbd --> dbs[connections.md, sqlite-sandbox.md, statement-check.md, structured-writes.md,
+                raw-writes.md, backups.md, diagnostics.md]
     mcpd --> mcps[tool-catalog.md, query-results.md, error-model.md, schema-output.md,
                    write-tool-arguments.md]
     plans --> rm[mvp-roadmap.md]
@@ -67,7 +67,8 @@ every file it held is current state now, under `deployment/` and `security/`.
 | File | Contents |
 | --- | --- |
 | [database/connections.md](database/connections.md) | The read-only connection, the write connection and `ForeignKeys`, `query_only`, pooling off, where the sandbox applies, the request and write semaphores, the filesystem constraints. |
-| [database/sqlite-sandbox.md](database/sqlite-sandbox.md) | The always-on SQLite controls, the verified native API, the three allowlist policies, runtime limits, the one-statement rule, hard boundaries, cancellation. |
+| [database/sqlite-sandbox.md](database/sqlite-sandbox.md) | The always-on SQLite controls, the verified native API, the three allowlist policies, runtime limits, hard boundaries, cancellation. |
+| [database/statement-check.md](database/statement-check.md) | `ValidateSingleStatement`: the `StatementCheck` values, why an empty statement is not a null wrapper, and how a bare `SELECT` is kept off the write path. |
 | [database/structured-writes.md](database/structured-writes.md) | Why the server builds the statement, the three tools, the flat filter model, the order of an insert and of a mutation, the two row-limit checks, identifier validation, the value table, the result shapes. |
 | [database/raw-writes.md](database/raw-writes.md) | `execute_write_sql`: the two arguments and why there is no parameter map, what the permission bypasses and what it does not, the DML policy and the `sqlite_%` rule, the step order, the `RETURNING` drain, the result, the budget, the `sqlHash` log. |
 | [database/backups.md](database/backups.md) | The task-mode call, the step loop and why it is not `BackupDatabase`, restarts and the restart cap with measured numbers, partial files, path safety, the backup slot. |
@@ -88,6 +89,8 @@ every file it held is current state now, under `deployment/` and `security/`.
 | File | Contents |
 | --- | --- |
 | [testing/e2e-harness.md](testing/e2e-harness.md) | The dual-target harness, the sample database, the dev script, the runner. Every later phase depends on it. |
+| [testing/live-database-suite.md](testing/live-database-suite.md) | The sidecar against a database that another client is using. The invariant-not-interleaving rule, the owning-application simulator, why it is in process only. |
+| [testing/bad-agent-suite.md](testing/bad-agent-suite.md) | The malformed-call corpus. Why the cases are data, the four invariants, the four expectations and how a recorded gap is pinned. |
 
 ## decisions/
 
@@ -136,7 +139,9 @@ documents go here.
 | Start a session | `lode-map.md`, `terminology.md`, `summary.md` |
 | Continue implementation | `plans/mvp-roadmap.md`, `practices.md` |
 | Write or run a test | `testing/e2e-harness.md`, `plans/required-tests.md` |
-| Touch SQLite access | `database/sqlite-sandbox.md`, `database/connections.md` |
+| Test contention or a badly behaved agent | `testing/live-database-suite.md`, `testing/bad-agent-suite.md` |
+| Look for a known gap | `plans/required-tests.md`, then `.scratch/agent-abuse-hardening/` |
+| Touch SQLite access | `database/sqlite-sandbox.md`, `database/statement-check.md`, `database/connections.md` |
 | Touch a backup | `database/backups.md`, `decisions/0006-backup-restart-cap.md`, `decisions/0007-tasks-over-a-status-tool.md` |
 | Add or change a tool | `mcp/tool-catalog.md`, `security/permissions.md`, `mcp/error-model.md` |
 | Touch authentication | `security/authentication.md`, `security/permissions.md` |

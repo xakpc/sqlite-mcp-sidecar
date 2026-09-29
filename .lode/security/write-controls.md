@@ -85,13 +85,33 @@ Three bounds, because a dictionary with caller-supplied keys is a memory-exhaust
 
 | Outcome | Meaning |
 | --- | --- |
-| `NotFound` | New identifier. Execute. |
+| `NotFound` | New identifier. **The check reserved it.** Execute. |
 | `Replay` | Identifier and payload match a committed write. Return the stored response. |
 | `PayloadConflict` | Identifier matches, payload does not. `InvalidWrite`. |
+| `InFlight` | The same request is running on another call. `DatabaseBusy`, "already running". |
+
+**Invariant.** `Check` reserves the identifier inside the lock that reads it, and `NotFound` means
+"you own the reservation". `RunWriteAsync` ends it with `Store` on a commit and with `Release` on
+every other path, in a `finally`, thus an unexpected exception cannot leak one.
+
+**Lesson.** A test and a separate reserve is not the same thing. `Check` and `Store` used to take
+the lock separately and `Store` ran only after the commit, thus every caller that arrived before
+that commit was told to execute and two concurrent calls with one identifier **both wrote the row**.
+The window was the whole duration of the write, and an MCP client retrying a call that timed out
+lands in it by construction: the transport is stateless, so the retry is a second live request and
+not a replacement for the first. `maxRows` bounds one call; it does not bound the same call two
+times. `WriteDeduplicationTests.ASecondCheckBeforeTheFirstStoreDoesNotSayExecute` is the proof and it
+needs no timing.
+
+**Lesson.** `Release` marks the entry rather than removing it. The key is already in the order
+queue, thus a removal would let a later reservation enqueue the same key a second time, and eviction
+would then drop a live entry while the stale duplicate sat in front of it. An entry therefore has
+three states: reserved, released and committed.
 
 **Invariant.** Store a committed outcome only. A cached failure would make the instruction "retry
 later" of `DatabaseBusy` and `WriteBudgetExceeded` impossible to follow for the whole window.
-`WriteIdempotencyTests.ARequestIdThatFailedStaysUsable` proves it.
+`WriteIdempotencyTests.ARequestIdThatFailedStaysUsable` proves it, and a released reservation is
+what makes that retry executable.
 
 **Invariant.** A replay returns the **byte-identical** response. A retry has to look like the first
 call, thus no flag marks it. The `replayed=true` field of the log line is the only record.

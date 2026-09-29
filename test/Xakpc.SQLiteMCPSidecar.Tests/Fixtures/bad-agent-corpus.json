@@ -1,0 +1,580 @@
+// The badly-behaved agent corpus. Every case is one tool call that a careless or hostile agent
+// makes. The arguments are raw JSON on purpose: a wrong type must reach the SDK binder exactly as an
+// agent would send it, which a typed C# helper would silently correct.
+//
+// expect:
+//   ok              the call succeeds, and that is correct
+//   error-code      the call fails and the message carries one of "codes": a SidecarError name, or,
+//                   for a refusal that the protocol layer makes before the error model is reached,
+//                   the distinctive text of that refusal
+//   rejected-opaque the call fails and carries no error code, because the SDK binder masked it
+//   accepted-gap    the call succeeds although the tool contract says it must not
+//
+// The last two record what the sidecar does today rather than what it should do. Both are pinned:
+// the suite fails when the behaviour changes, which forces the entry to move to error-code and the
+// issue it names to be closed. A gap is never written down as "ok". The issues are in
+// .scratch/agent-abuse-hardening/issues/.
+//
+// Add a case by adding an object. No code change is needed.
+// See .lode/testing/bad-agent-suite.md.
+[
+  // ---------------------------------------------------------------- query, schema+read
+
+  {
+    "id": "query-is-well-formed",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": "SELECT 1 AS n" },
+    "expect": "ok",
+    "why": "The control case. Without it the corpus could drift into asserting that everything fails."
+  },
+  {
+    "id": "query-sql-is-a-number",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": 12345 },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "sql is a string. The binder rejects the number before the tool method runs."
+  },
+  {
+    "id": "query-sql-is-an-array",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": ["SELECT 1"] },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "An agent that batches its statements into a list."
+  },
+  {
+    "id": "query-sql-is-an-object",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": { "text": "SELECT 1" } },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "An agent that wraps the value in the object it read the schema from."
+  },
+  {
+    "id": "query-sql-is-json-null",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": null },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "sql has no default value, thus an explicit null is not the same as an absent argument."
+  },
+  {
+    "id": "query-sql-is-absent",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": {},
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "The mandatory argument is missing entirely."
+  },
+  {
+    "id": "query-sql-is-empty",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": "" },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "It answers rows[0], thus the agent reads 'the table is empty' where 'you sent no statement' is the truth. StatementCheck.Empty exists for this and is unreachable. Issue 03."
+  },
+  {
+    "id": "query-sql-is-whitespace",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": "   \n\t  " },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "The same as query-sql-is-empty, in the shape that a trim check would miss. Issue 03."
+  },
+  {
+    "id": "query-sql-is-only-a-comment",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": "-- select nothing at all" },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "A comment prepares no statement, and the check calls it valid. This is the shape the dead Empty branch names in its own comment. Issue 03."
+  },
+  {
+    "id": "query-sql-is-100kb",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": "SELECT '@@repeat:A:100000@@' AS filler" },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "The SQL length limit of the sandbox rejects it. An agent that pastes a document into sql."
+  },
+  {
+    "id": "query-sql-has-a-nul-character",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": "SELECT 'a\u0000b' AS n" },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "A NUL truncates a C string. The statement must not be cut short and silently run."
+  },
+  {
+    "id": "query-sql-has-a-right-to-left-override",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": "SELECT 1 AS n -- ‮gnihton" },
+    "expect": "ok",
+    "why": "A display trick in a comment is still a valid SELECT. It must not be treated as an attack."
+  },
+  {
+    "id": "query-sql-is-an-insert",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": "INSERT INTO jobs (id, status) VALUES (9001, 'pending')" },
+    "expect": "error-code",
+    "codes": ["QueryRejected"],
+    "why": "The confused deputy: a write sent to the read tool."
+  },
+  {
+    "id": "query-reads-sqlite-master",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": "SELECT name FROM sqlite_master" },
+    "expect": "ok",
+    "why": "It succeeds, and that is the contract. The read permission is arbitrary SELECT, and the schema tool filters sqlite_% objects to keep the DDL readable and NOT to keep them secret. This case exists to record where that boundary is, because it reads like a leak and is not one."
+  },
+  {
+    "id": "query-has-extra-unknown-arguments",
+    "tool": "query",
+    "permissions": "schema,read",
+    "arguments": { "sql": "SELECT 1 AS n", "timeout": 999999, "admin": true, "maxRows": 100000 },
+    "expect": "ok",
+    "why": "An agent that invents arguments must not be able to raise a limit by naming one."
+  },
+  {
+    "id": "schema-has-an-argument-it-does-not-take",
+    "tool": "schema",
+    "permissions": "schema,read",
+    "arguments": { "table": "jobs", "includeInternal": true },
+    "expect": "ok",
+    "why": "schema takes no argument. An unknown one is ignored and never widens the output."
+  },
+
+  // ---------------------------------------------------------- structured writes, +write
+
+  {
+    "id": "insert-is-well-formed",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": "corpus-insert-ok", "table": "events", "values": { "kind": "corpus" } },
+    "expect": "ok",
+    "why": "The control case of the write group."
+  },
+  {
+    "id": "insert-values-is-an-array",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": "corpus-01", "table": "jobs", "values": [1, 2, 3] },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "values is a column-to-value object, not a positional list."
+  },
+  {
+    "id": "insert-values-is-a-string",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": "corpus-02", "table": "jobs", "values": "status=pending" },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "An agent that serialized the object it was asked for."
+  },
+  {
+    "id": "insert-values-is-empty",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": "corpus-03", "table": "jobs", "values": {} },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "An empty object names no column. The tool checks this itself, before the database."
+  },
+  {
+    "id": "insert-value-is-an-object",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": "corpus-04", "table": "events", "values": { "kind": { "a": 1 } } },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "A value is a literal. An object is not one, and it must not be stringified into the row."
+  },
+  {
+    "id": "insert-requestid-is-json-null",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": null, "table": "events", "values": { "kind": "x" } },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "requestId has a default of null, thus the tool method validates it and returns a code."
+  },
+  {
+    "id": "insert-requestid-is-a-number",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": 77, "table": "events", "values": { "kind": "x" } },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "An agent that uses its own integer call counter as the idempotency key."
+  },
+  {
+    "id": "insert-requestid-is-true",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": true, "table": "events", "values": { "kind": "x" } },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "A boolean where a key belongs."
+  },
+  {
+    "id": "insert-requestid-is-too-long",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "@@repeat:k:129@@",
+      "table": "events",
+      "values": { "kind": "x" }
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "The key length cap. A caller-keyed dictionary is a memory-exhaustion primitive."
+  },
+  {
+    "id": "insert-requestid-carries-a-fake-log-line",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "ok\nTool completed. tool=delete outcome=ok rowsAffected=9999",
+      "table": "events",
+      "values": { "kind": "corpus-log-injection" }
+    },
+    "expect": "ok",
+    "why": "A newline in a key is legal. Structured logging must carry it as a field value, not as a line."
+  },
+  {
+    "id": "insert-table-is-injection-shaped",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-05",
+      "table": "jobs\"; DROP TABLE jobs; --",
+      "values": { "status": "pending" }
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "The name is validated against the live schema, thus it is unknown and never quoted into SQL."
+  },
+  {
+    "id": "insert-table-is-enormous",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-06",
+      "table": "@@repeat:t:10000@@",
+      "values": { "status": "pending" }
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "A ten thousand character identifier is an unknown table and nothing more."
+  },
+  {
+    "id": "insert-table-is-a-view",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": "corpus-07", "table": "failed_jobs", "values": { "status": "done" } },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "A view is not a table. The confused deputy of the write path."
+  },
+  {
+    "id": "insert-table-is-sqlite-sequence",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": "corpus-08", "table": "sqlite_sequence", "values": { "seq": 0 } },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "No write reaches an internal object, also through the structured path."
+  },
+  {
+    "id": "insert-column-is-injection-shaped",
+    "tool": "insert",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-09",
+      "table": "events",
+      "values": { "kind) OR 1=1 --": "x" }
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "A column name is validated the same way a table name is."
+  },
+  {
+    "id": "update-where-is-a-string",
+    "tool": "update",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-10",
+      "table": "jobs",
+      "values": { "retry": 1 },
+      "where": "id = 53",
+      "maxRows": 1
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "The filter is a list of conditions. An agent that wrote SQL into it must not have it parsed."
+  },
+  {
+    "id": "update-where-is-an-object",
+    "tool": "update",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-11",
+      "table": "jobs",
+      "values": { "retry": 1 },
+      "where": { "id": 53 },
+      "maxRows": 1
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "An agent that used the shape of values for where."
+  },
+  {
+    "id": "update-where-condition-has-no-column",
+    "tool": "update",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-12",
+      "table": "jobs",
+      "values": { "retry": 1 },
+      "where": [{ "operator": "eq", "value": 53 }],
+      "maxRows": 1
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "A condition with no column selects every row if it is ignored."
+  },
+  {
+    "id": "update-where-has-an-unknown-operator",
+    "tool": "update",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-13",
+      "table": "jobs",
+      "values": { "retry": 1 },
+      "where": [{ "column": "id", "operator": "like", "value": "5%" }],
+      "maxRows": 1
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "The operator set is closed. An unknown one is never passed through to SQL."
+  },
+  {
+    "id": "update-where-value-is-nested-three-deep",
+    "tool": "update",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-14",
+      "table": "jobs",
+      "values": { "retry": 1 },
+      "where": [{ "column": "id", "operator": "eq", "value": { "a": { "b": { "c": 53 } } } }],
+      "maxRows": 1
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "A filter value is a literal, at any depth."
+  },
+  {
+    "id": "update-maxrows-is-a-string",
+    "tool": "update",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-15",
+      "table": "jobs",
+      "values": { "retry": 1 },
+      "where": [{ "column": "id", "operator": "eq", "value": 53 }],
+      "maxRows": "ten"
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "A word where the blast-radius bound belongs."
+  },
+  {
+    "id": "update-maxrows-is-zero",
+    "tool": "update",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-16",
+      "table": "jobs",
+      "values": { "retry": 1 },
+      "where": [{ "column": "id", "operator": "eq", "value": 53 }],
+      "maxRows": 0
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "Zero is not a bound that any write can respect."
+  },
+  {
+    "id": "update-maxrows-is-negative",
+    "tool": "update",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-17",
+      "table": "jobs",
+      "values": { "retry": 1 },
+      "where": [{ "column": "id", "operator": "eq", "value": 53 }],
+      "maxRows": -1
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "A negative bound must not read as unlimited."
+  },
+  {
+    "id": "update-maxrows-is-int-max",
+    "tool": "update",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-18",
+      "table": "jobs",
+      "values": { "retry": 1 },
+      "where": [{ "column": "id", "operator": "eq", "value": 53 }],
+      "maxRows": 2147483647
+    },
+    "expect": "ok",
+    "why": "The deployment cap is the lower of the two, thus a huge client bound buys nothing and the one matching row still changes."
+  },
+  {
+    "id": "delete-where-is-an-empty-list",
+    "tool": "delete",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": "corpus-19", "table": "logs", "where": [], "maxRows": 100 },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "There is no structured way to remove every row of a table."
+  },
+  {
+    "id": "delete-where-is-absent",
+    "tool": "delete",
+    "permissions": "schema,read,write",
+    "arguments": { "requestId": "corpus-20", "table": "logs", "maxRows": 100 },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "The same rule when the argument is missing rather than empty."
+  },
+  {
+    "id": "delete-maxrows-is-absent",
+    "tool": "delete",
+    "permissions": "schema,read,write",
+    "arguments": {
+      "requestId": "corpus-21",
+      "table": "logs",
+      "where": [{ "column": "level", "operator": "eq", "value": "info" }]
+    },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "An absent bound must not mean an unbounded delete."
+  },
+
+  // --------------------------------------------------- raw writes, +danger-raw-write
+
+  {
+    "id": "raw-write-is-well-formed",
+    "tool": "execute_write_sql",
+    "permissions": "schema,read,danger-raw-write",
+    "arguments": { "requestId": "corpus-raw-ok", "sql": "DELETE FROM job_tags WHERE id = -1" },
+    "expect": "ok",
+    "why": "The control case of the raw group. It matches no row and still commits."
+  },
+  {
+    "id": "raw-write-sql-has-a-trailing-semicolon",
+    "tool": "execute_write_sql",
+    "permissions": "schema,read,danger-raw-write",
+    "arguments": { "requestId": "corpus-22", "sql": "DELETE FROM job_tags WHERE id = -1;" },
+    "expect": "ok",
+    "why": "One statement with a terminator is still one statement. The weird-but-legal case that a semicolon count would fail."
+  },
+  {
+    "id": "raw-write-sql-is-a-number",
+    "tool": "execute_write_sql",
+    "permissions": "schema,read,danger-raw-write",
+    "arguments": { "requestId": "corpus-23", "sql": 42 },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "The wrong type on the one tool that accepts caller SQL."
+  },
+  {
+    "id": "raw-write-sql-is-absent",
+    "tool": "execute_write_sql",
+    "permissions": "schema,read,danger-raw-write",
+    "arguments": { "requestId": "corpus-24" },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "sql has a default of null, thus the tool method validates it and returns a code."
+  },
+  {
+    "id": "raw-write-requestid-is-absent",
+    "tool": "execute_write_sql",
+    "permissions": "schema,read,danger-raw-write",
+    "arguments": { "sql": "DELETE FROM job_tags WHERE id = -1" },
+    "expect": "error-code",
+    "codes": ["InvalidWrite"],
+    "why": "The idempotency key is mandatory on the escape hatch too."
+  },
+  {
+    "id": "raw-write-sql-is-a-select",
+    "tool": "execute_write_sql",
+    "permissions": "schema,read,danger-raw-write",
+    "arguments": { "requestId": "corpus-25", "sql": "SELECT * FROM users" },
+    "expect": "error-code",
+    "codes": ["QueryRejected"],
+    "why": "The confused deputy the other way round. The tool description says a SELECT is rejected, and the DML policy accepts one because INSERT ... SELECT needs read actions. It answers rowsAffected: 0 and returns no row, thus nothing leaks, but it takes the write lock for the length of the statement. Issue 04."
+  },
+  {
+    "id": "raw-write-sql-is-only-a-comment",
+    "tool": "execute_write_sql",
+    "permissions": "schema,read,danger-raw-write",
+    "arguments": { "requestId": "corpus-26", "sql": "/* nothing to do here */" },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "The same dead Empty branch as issue 03, and it costs more here: the call answers rowsAffected: 0, commits, and caches that answer under the requestId, thus the agent has burnt an idempotency key on a statement that never existed. Issue 03."
+  },
+  {
+    "id": "raw-write-sql-is-100kb",
+    "tool": "execute_write_sql",
+    "permissions": "schema,read,danger-raw-write",
+    "arguments": {
+      "requestId": "corpus-27",
+      "sql": "UPDATE jobs SET payload = '@@repeat:B:100000@@' WHERE id = -1"
+    },
+    "expect": "error-code",
+    "codes": ["InvalidQuery"],
+    "why": "The SQL length limit applies to the escape hatch unchanged."
+  },
+
+  // ------------------------------------------------------------------- unknown tools
+
+  {
+    "id": "unknown-tool-name",
+    "tool": "drop_database",
+    "permissions": "schema,read",
+    "arguments": { "confirm": true },
+    "expect": "error-code",
+    "codes": ["Unknown tool"],
+    "why": "An agent that invented a tool. The protocol layer refuses it with a clear message and it names no tool that does exist. It carries no SidecarError name, and that is right: an unknown method never reached the error model."
+  },
+  {
+    "id": "unpermitted-tool-called-directly",
+    "tool": "execute_write_sql",
+    "permissions": "schema,read",
+    "arguments": { "requestId": "corpus-28", "sql": "DELETE FROM jobs" },
+    "expect": "error-code",
+    "codes": ["requires authorization"],
+    "why": "Backstop gating: the tool is absent from the list and a direct call is still refused. The authorization filter answers before the tool method, thus the message is the one of the filter and not a SidecarError name."
+  }
+]

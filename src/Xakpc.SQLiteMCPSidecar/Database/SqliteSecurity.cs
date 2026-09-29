@@ -41,6 +41,16 @@ internal enum StatementCheck
     /// <summary>The authorizer rejected an action during preparation.</summary>
     Rejected,
 
+    /// <summary>
+    /// The statement writes nothing, on a path that exists to write. It belongs in the query tool.
+    /// </summary>
+    /// <remarks>
+    /// The authorizer cannot produce this: <see cref="AuthorizerPolicy.Dml"/> has to accept read
+    /// actions, because a <c>WHERE</c> clause, a subquery and <c>INSERT ... SELECT</c> all read. It
+    /// sees actions and never statement kinds, thus the kind is asked of the prepared statement.
+    /// </remarks>
+    ReadOnlyOnAWritePath,
+
     /// <summary>The statement did not prepare: malformed SQL, an unknown table, or a limit.</summary>
     Invalid,
 
@@ -181,11 +191,21 @@ internal static class SqliteSecurity
     /// Proves that the caller sent exactly one statement, and that the authorizer accepts it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The count comes from preparation and never from counting semicolons: a semicolon appears in a
     /// string literal and in a comment. <c>sqlite3_prepare_v2</c> reports the unconsumed text in
     /// <c>tail</c>, thus a non-empty tail is a second statement.
+    /// </para>
+    /// <para>
+    /// <paramref name="mustWrite"/> is <c>true</c> on the raw write path. It is the only way to tell
+    /// a bare <c>SELECT</c> from the read half of a write, because the authorizer sees actions and
+    /// not statement kinds.
+    /// </para>
     /// </remarks>
-    public static StatementCheck ValidateSingleStatement(SqliteConnection connection, string sql)
+    public static StatementCheck ValidateSingleStatement(
+        SqliteConnection connection,
+        string sql,
+        bool mustWrite = false)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(sql);
@@ -215,13 +235,33 @@ internal static class SqliteSecurity
                 return StatementCheck.Invalid;
             }
 
-            if (statement is null)
+            // Whitespace or a comment only. SQLite prepares nothing and reports no error.
+            //
+            // LESSON: `statement is null` is NOT the test. SQLitePCLRaw hands back a non-null
+            // sqlite3_stmt wrapper around a null pointer for empty input, thus a null check is dead
+            // code and every empty statement was reported as a successful query of zero rows. The
+            // agent then read "the table is empty" where "you sent no statement" was the truth. Ask
+            // the statement for its own text instead: an empty one has none.
+            if (statement is null || string.IsNullOrWhiteSpace(raw.sqlite3_sql(statement).utf8_to_string()))
             {
-                // Whitespace or a comment only. SQLite prepares nothing and reports no error.
                 return StatementCheck.Empty;
             }
 
-            return string.IsNullOrWhiteSpace(tail) ? StatementCheck.Ok : StatementCheck.MultipleStatements;
+            if (!string.IsNullOrWhiteSpace(tail))
+            {
+                return StatementCheck.MultipleStatements;
+            }
+
+            // A statement that writes nothing has no business on the write path. It would otherwise
+            // run inside BEGIN IMMEDIATE and hold the write lock of the owning application for its
+            // whole duration, while the query tool runs the same text on a read-only connection and
+            // blocks nobody.
+            if (mustWrite && raw.sqlite3_stmt_readonly(statement) != 0)
+            {
+                return StatementCheck.ReadOnlyOnAWritePath;
+            }
+
+            return StatementCheck.Ok;
         }
         finally
         {

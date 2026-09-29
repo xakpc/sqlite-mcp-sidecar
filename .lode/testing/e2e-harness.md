@@ -79,6 +79,12 @@ match, thus one container run only exercises the tests that ask for exactly that
 The remaining sets exercise .NET logic that the in-process job already runs on Linux. A matrix entry
 that adds a set adds a container start for tests that the first job already covers.
 
+**The container sidecar runs with a raised request budget.** The whole suite shares one process
+there, and the bad-agent corpus alone is over a hundred requests in a minute, thus the default
+`MAX_REQUESTS_PER_MINUTE` of 120 answers `429` and the run proves nothing. `RateLimitTests` owns the
+budget, it sets its own small value through the harness, and it is skipped against an external
+sidecar anyway, thus raising it costs no coverage. See [bad-agent-suite.md](bad-agent-suite.md).
+
 **The container target shares one database across the whole run.** The in-process harness gives each
 test its own file; the container has one mounted database and every test in that run works on it.
 Each matrix entry therefore seeds a fresh database, and a new test that asserts an absolute row
@@ -200,6 +206,9 @@ variables match both paths.
 | `SchemaToolTests` | Usable DDL, no internal `sqlite_%` objects, no row data, and no database path. |
 | `SandboxBoundaryTests` | Each hard boundary through `query`: `ATTACH`, DDL, pragmas, `VACUUM INTO`, `load_extension`, writes, transaction control, more than one statement. Also that a rejection names no path and that the permission set does not weaken any of it. |
 | `QueryToolTests` | TOON output, the `truncated` flag, an empty result, ordinary SQL functions, repeated column names, both truncation limits, `ResultTooLarge`, the timeout interrupt, a read while the application writes, a read against a locked database, and the absence of `query` without the `read` permission. |
+| `LiveDatabaseTests` | The sidecar against a database that the owning application is using: writes under contention, a forced lock conflict, the retry after it, a saturated request semaphore, torn reads and a backup under load. See [live-database-suite.md](live-database-suite.md). |
+| `BadAgentTests`, `BadAgentProtocolTests` | The malformed and hostile call corpus, and the raw-HTTP shapes a typed client cannot send. See [bad-agent-suite.md](bad-agent-suite.md). |
+| `WriteDeduplicationTests` | The idempotency cache on its own, for the concurrent case that no end-to-end test can pin down. |
 
 **Lesson.** A tool failure arrives as a `CallToolResult` with `IsError` set, and not as a transport
 exception. `CallQueryAsync` and `CallSchemaAsync` raise `McpToolFailure` for that shape, thus a test

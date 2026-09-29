@@ -116,6 +116,10 @@ builder.Services
             string.Equals(request.Params?.Name, SqliteTools.BackupToolName, StringComparison.Ordinal)
                 ? McpTaskExecutionMode.Required
                 : McpTaskExecutionMode.Synchronous)
+    // The binder runs before a tool method, thus an argument of the wrong JSON type never reaches
+    // one and the SDK would answer with its own masked message. This filter gives that failure an
+    // error code, so the error model owns every failure an agent can cause.
+    .WithRequestFilters(filters => filters.AddCallToolFilter(ArgumentBindingFilter.Handle))
     // Explicit registration. Assembly scanning is annotated RequiresUnreferencedCode, which blocks
     // NativeAOT, and it would remove permission control of the exposed surface.
     .WithTools<SqliteTools>();

@@ -40,9 +40,10 @@ DELETE
 ```
 
 Normal SQLite features of those statements are available where the authorizer permits them: CTEs,
-`RETURNING`, subqueries, expressions and conflict clauses. A plain `SELECT` also runs and returns its
-rows, which gains the caller nothing, because the read floor guarantees `read`; it only occupies the
-write slot.
+`RETURNING`, subqueries, expressions and conflict clauses.
+
+**A plain `SELECT` is rejected**, with `QueryRejected` and text that names the query tool. It used to
+run and hold the **write lock** for its whole duration. See [statement-check.md](statement-check.md).
 
 ## What the permission bypasses
 

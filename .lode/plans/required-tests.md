@@ -207,14 +207,24 @@ The raw write list is complete too. `RawWriteToolTests` covers the raw `INSERT`,
 `UPDATE ... RETURNING` cases, and the three deployment shapes each have a test that asserts which tools
 the permission set exposes.
 
-These items have no test of their own, and each one is covered as a side effect elsewhere:
+Every item of the mandatory lists now has a test of its own. `SQLITE_BUSY` and concurrency limiting
+were the last two without one, and `LiveDatabaseTests` covers both. `query timeout` is covered by
+`QueryToolTests`. See [../testing/live-database-suite.md](../testing/live-database-suite.md).
+
+## The four gaps that the two suites found
+
+All four are fixed: the corpus holds no recorded gap and no test is `Explicit`. The tickets and their
+resolutions are in `.scratch/agent-abuse-hardening/`.
 
 ```text
-SQLITE_BUSY behavior     the write slot returns DatabaseBusy; no test forces a real lock conflict
-concurrency limiting     the request semaphore has no test that saturates it
+01  concurrent calls with one requestId both wrote -> Check reserves it   WriteDeduplicationTests
+02  a wrong argument type gave no code   -> ArgumentBindingFilter    13 corpus cases
+03  an empty statement reported success  -> the statement check       4 corpus cases
+04  execute_write_sql ran a SELECT       -> sqlite3_stmt_readonly     1 corpus case
 ```
 
-`query timeout` is covered: `QueryToolTests` proves that a runaway query returns `QueryTimedOut`.
+**03 belongs to the native SQLite build**: the dead branch looked correct on every target, thus a
+Windows run is necessary and not sufficient. Verify it against a real sidecar or the container.
 
 **A WAL database and a rollback-journal database are both covered now.** They were not before:
 `sample-db.sql` sets `PRAGMA journal_mode = WAL`, and the fixture applied the requested mode before
@@ -230,11 +240,9 @@ permission sets. See [../testing/e2e-harness.md](../testing/e2e-harness.md).
 
 **A query against a locked database returns `DatabaseBusy`.**
 `QueryToolTests.AQueryAgainstALockedDatabaseIsDatabaseBusy` holds `BEGIN EXCLUSIVE` from a second
-connection and asserts both the code and that the call waited for the busy timeout. It needs a
-rollback-journal database, because a WAL writer does not block a reader and the condition cannot be
-produced in WAL at all. See
+connection and asserts both the code and the wait. It needs a rollback-journal database, because a
+WAL writer does not block a reader. See
 [../decisions/0009-a-locked-database-is-not-a-caller-mistake.md](../decisions/0009-a-locked-database-is-not-a-caller-mistake.md).
-
 
 ## Related
 

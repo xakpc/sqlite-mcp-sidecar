@@ -261,7 +261,7 @@ public sealed class BackupToolTests
     /// <summary>
     /// Calls <c>backup</c> the way a real client must: as a task, polled to a terminal state.
     /// </summary>
-    private static async Task<string> BackupAsync(McpClient client, string? label)
+    internal static async Task<string> BackupAsync(McpClient client, string? label)
     {
         var arguments = new Dictionary<string, System.Text.Json.JsonElement>();
         if (label is not null)

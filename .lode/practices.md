@@ -31,7 +31,8 @@ src/Xakpc.SQLiteMCPSidecar/
     Configuration/   SidecarOptions.cs, SidecarStartup.cs
     Database/        SqliteService.cs, SqliteSecurity.cs, QueryResult.cs,
                      StructuredWriteBuilder.cs, BackupService.cs
-    Mcp/             SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs
+    Mcp/             SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs,
+                     ArgumentBindingFilter.cs
     Security/        PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs,
                      WriteBudget.cs, WriteDeduplication.cs
 ```
@@ -129,6 +130,17 @@ instead. See [mcp/tool-catalog.md](mcp/tool-catalog.md).
 ```csharp
 public async Task<CallToolResult> InsertAsync(string? requestId = null, ...)
 ```
+
+**A wrong argument type needs the binding filter, because `= null` cannot reach it.** The binder runs
+before the tool method, thus an argument of the wrong JSON type never gets there and the SDK masks
+that message too. `AddCallToolFilter` with `ArgumentBindingFilter` catches the `JsonException` and
+returns a code. Keep the parameters typed: declaring them as `JsonElement` also returns a code and it
+costs the JSON schema, which is the one machine-readable account of the shape the agent has to build.
+See [mcp/write-tool-arguments.md](mcp/write-tool-arguments.md).
+
+**The rule behind all three: the error model owns every failure that an agent can cause.** Add a tool
+and the filter covers its binding for free; the `= null` default and the in-method check are still
+per-argument work.
 
 Explicit registration has two reasons. It keeps the exposed tool set under permission
 control, and assembly scanning is annotated `RequiresUnreferencedCode`, which blocks

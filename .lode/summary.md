@@ -33,6 +33,15 @@ cache and write budget, under a third authorizer policy that also refuses a writ
 object. It gives up `maxRows`, the pre-count and the rollback, and it gives up nothing of the SQLite
 sandbox.
 
+**Two end-to-end suites found four defects and all four are fixed.** One suite runs the sidecar
+against a database that another client is writing; the other sends a corpus of malformed calls. The
+worst was that two concurrent calls with one `requestId` both wrote, which is the failure the
+idempotency key exists to prevent; `Check` now reserves the identifier in the lock that reads it. The
+other three: an argument of the wrong JSON type reached the agent with no error code, an empty or
+comment-only statement answered as a successful query of zero rows, and `execute_write_sql` ran a
+`SELECT` and held the write lock for it. See `.scratch/agent-abuse-hardening/` and
+[plans/required-tests.md](plans/required-tests.md).
+
 **Every product capability is implemented, and the product ships.** The image is non-root,
 hardened and multi-architecture, tagged builds publish to `ghcr.io/xakpc/sqlite-mcp-sidecar`, CI
 runs the suite against that image, and `README.md`, `SECURITY.md` and `LICENSE` exist. What is left
@@ -50,6 +59,8 @@ is the NativeAOT attempt (Phase 8).
 | TOON results and limits | Implemented — [mcp/query-results.md](mcp/query-results.md) |
 | Error model, every path | Implemented — [mcp/error-model.md](mcp/error-model.md) |
 | Test harness | Implemented — [testing/e2e-harness.md](testing/e2e-harness.md) |
+| Live-database contention suite | Implemented — [testing/live-database-suite.md](testing/live-database-suite.md) |
+| Badly-behaved agent corpus | Implemented — [testing/bad-agent-suite.md](testing/bad-agent-suite.md) |
 | Write connection, write semaphore, write authorizer policy | Implemented — [database/connections.md](database/connections.md), [database/sqlite-sandbox.md](database/sqlite-sandbox.md) |
 | `insert` and identifier validation | Implemented — [database/structured-writes.md](database/structured-writes.md) |
 | Write budget and write idempotency | Implemented — [security/write-controls.md](security/write-controls.md) |
@@ -97,18 +108,24 @@ src/Xakpc.SQLiteMCPSidecar/
                                    StructuredWriteBuilder.cs, BackupService.cs
     Exceptions/                    SidecarConfigurationException.cs, StatementRejectedException.cs,
                                    InvalidWriteException.cs, WriteLimitExceededException.cs
-    Mcp/                           SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs
+    Mcp/                           SqliteTools.cs, SidecarError.cs, SidecarEndpoints.cs,
+                                   ArgumentBindingFilter.cs
     Security/                      PermissionSet.cs, DeploymentTokenAuthenticationHandler.cs,
                                    WriteBudget.cs, WriteDeduplication.cs
 test/Xakpc.SQLiteMCPSidecar.Tests/
     GlobalUsings.cs
-    Harness/                       SidecarHarness.cs
-    Fixtures/                      sample-db.sql, SampleDatabase.cs, DevDatabaseTests.cs
+    Harness/                       SidecarHarness.cs, OwningApplication.cs, BadAgentCorpus.cs
+    Fixtures/                      sample-db.sql, SampleDatabase.cs, DevDatabaseTests.cs,
+                                   bad-agent-corpus.json
     StartupTests.cs, AuthTests.cs, PermissionGatingTests.cs, SchemaToolTests.cs
     SandboxBoundaryTests.cs, QueryToolTests.cs, RateLimitTests.cs
     InsertToolTests.cs, UpdateToolTests.cs, DeleteToolTests.cs
     WriteIdempotencyTests.cs, WriteBudgetTests.cs, RawWriteToolTests.cs
     BackupToolTests.cs, DiagnosticsToolTests.cs
+    LiveDatabaseTests.cs           the sidecar and another client on one file
+    BadAgentTests.cs               the malformed-call corpus, and the raw-HTTP half
+    WriteDeduplicationTests.cs     the idempotency cache on its own
+.scratch/agent-abuse-hardening/    the four gaps the two suites found
 sqlite-sidecar-mcp — Design Document.md
 ```
 

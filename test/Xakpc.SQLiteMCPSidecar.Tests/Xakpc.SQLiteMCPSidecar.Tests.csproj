@@ -25,6 +25,9 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Fixtures/sample-db.sql" />
+    <!-- The badly-behaved agent corpus. It is data on purpose: a case is raw JSON that must reach
+         the SDK binder unchanged, which a typed C# literal would correct. -->
+    <EmbeddedResource Include="Fixtures/bad-agent-corpus.json" />
   </ItemGroup>
 
 </Project>

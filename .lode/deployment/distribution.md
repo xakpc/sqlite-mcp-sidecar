@@ -38,10 +38,14 @@ ref.
 
 ## The released version
 
-`v0.1.0` is the released tag and it carries the whole MVP. The registry holds `0.1.0`, `0.1`, `0` and
-`latest`, all four on one multi-architecture manifest, and the package is public, thus an anonymous
-`docker pull` succeeds. Each pull command in `README.md` names `latest`, thus the README is only
-correct while a `v*` tag exists.
+`v0.1.1` is the current released tag. `v0.1.0` was the first and it carries the whole MVP; `v0.1.1`
+adds nothing to the product and repairs how a startup failure reads. See
+[../configuration/options.md](../configuration/options.md).
+
+The registry holds `0.1.1` and `latest` on one digest, and `0.1.0` on its own, thus the first release
+stays pullable. `0.1` and `0` follow the newest tag. Every manifest is multi-architecture and the
+package is public, thus an anonymous `docker pull` succeeds. Each pull command in `README.md` names
+`latest`, thus the README is only correct while a `v*` tag exists.
 
 The version stays below `1.0.0` for two reasons: `Microsoft.Data.Sqlite` is a release candidate, and
 the NativeAOT question of Phase 8 can still change the base image. See

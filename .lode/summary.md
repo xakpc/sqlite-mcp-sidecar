@@ -42,8 +42,8 @@ comment-only statement answered as a successful query of zero rows, and `execute
 `SELECT` and held the write lock for it. See `.scratch/agent-abuse-hardening/` and
 [plans/required-tests.md](plans/required-tests.md).
 
-**Every product capability is implemented, and the product is released.** `v0.1.0` is the released
-version, public on `ghcr.io/xakpc/sqlite-mcp-sidecar` as `0.1.0`, `0.1`, `0` and `latest`, on one
+**Every product capability is implemented, and the product is released.** `v0.1.1` is the current
+released version, public on `ghcr.io/xakpc/sqlite-mcp-sidecar` as `0.1.1` and `latest`, on one
 manifest for `linux/amd64` and `linux/arm64`. The image is non-root and hardened, CI runs the suite
 against that image, and `README.md`, `SECURITY.md` and `LICENSE` exist. What is left is the NativeAOT
 attempt (Phase 8). See [deployment/distribution.md](deployment/distribution.md).

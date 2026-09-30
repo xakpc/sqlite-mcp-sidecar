@@ -179,9 +179,29 @@ exception carries the path `$`. See
 and every hand-written test built correctly typed arguments through a helper, which silently
 corrected the mistake. See [../testing/bad-agent-suite.md](../testing/bad-agent-suite.md).
 
-A refusal that the protocol layer makes before either mechanism, an unknown tool name or the
-authorization filter, carries no code of this model and says so in plain words: `Unknown tool:
-'drop_database'` and `Access forbidden: This tool requires authorization.`
+A refusal that the protocol layer makes before either mechanism carries no code of this model. Two of
+them say so in plain words: `Unknown tool: 'drop_database'` and `Access forbidden: This tool requires
+authorization.`
+
+**The third one says nothing, and that is a limit and not a defect.** `params` itself can fail to
+deserialize, for example when `arguments` is an array and not an object:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query","arguments":[1,2]}}
+```
+
+`CallToolRequestParams` is the type that fails to convert, thus the tool name is never read and
+`ArgumentBindingFilter` is never entered: the filter wraps the typed handler and the deserialization
+runs above it. The agent gets `An error occurred.` with no tool name and no code.
+
+Nothing here is worth a fix. The call is malformed at the JSON-RPC layer and not at the tool
+contract, the SDK owns that deserialization, and a code would cost a hand-written parse of the
+envelope. What the sidecar must do, it does: it answers, it answers with no 5xx and no stack trace,
+and it serves the next caller.
+`BadAgentProtocolTests.AMalformedBodyIsAnsweredWithoutAServerError` pins that behaviour, with
+`"arguments":[1,2]` as one of its bodies. The corpus cannot carry this case, because
+`BadAgentCase.Arguments` is a dictionary and a dictionary cannot hold an array. See
+[../testing/bad-agent-suite.md](../testing/bad-agent-suite.md).
 
 ## Disclosure rules
 

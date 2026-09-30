@@ -48,7 +48,7 @@ every file it held is current state now, under `deployment/` and `security/`.
 
 | File | Contents |
 | --- | --- |
-| [configuration/options.md](configuration/options.md) | Every `SQLITE_SIDECAR_` variable, why the read is explicit and deferred, the validation flow, the journal mode warning, the ASP.NET Core settings. |
+| [configuration/options.md](configuration/options.md) | Every `SQLITE_SIDECAR_` variable, why the read is explicit and deferred, the validation flow, how a startup failure reaches the operator, the journal mode warning, the ASP.NET Core settings. |
 
 ## security/
 
@@ -125,7 +125,7 @@ trade-off.
 | [deployment/summary.md](deployment/summary.md) | How the sidecar ships, the three rules every recipe repeats, and where the operator documentation lives. |
 | [deployment/container.md](deployment/container.md) | The repository-root build context, cross-compilation, the final stage, hardening, filesystem access, `compose.yaml`, the container launch profile. |
 | [deployment/platforms.md](deployment/platforms.md) | The path contract, then Kamal, Coolify, a plain VPS with systemd and Fly.io. The client header and token rotation. |
-| [deployment/distribution.md](deployment/distribution.md) | GHCR and why not Docker Hub, the trigger and tag scheme, both architectures, provenance. |
+| [deployment/distribution.md](deployment/distribution.md) | GHCR and why not Docker Hub, the trigger and tag scheme, the released version, the absent test gate, both architectures, provenance. |
 
 ## tmp/
 

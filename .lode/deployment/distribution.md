@@ -36,6 +36,24 @@ on:
 A `workflow_dispatch` run publishes no `latest`: the `enable` condition tests for a `refs/tags/v`
 ref.
 
+## The released version
+
+`v0.1.0` is the released tag and it carries the whole MVP. The registry holds `0.1.0`, `0.1`, `0` and
+`latest`, all four on one multi-architecture manifest, and the package is public, thus an anonymous
+`docker pull` succeeds. Each pull command in `README.md` names `latest`, thus the README is only
+correct while a `v*` tag exists.
+
+The version stays below `1.0.0` for two reasons: `Microsoft.Data.Sqlite` is a release candidate, and
+the NativeAOT question of Phase 8 can still change the base image. See
+[../plans/open-questions.md](../plans/open-questions.md).
+
+## No test gate on a tag
+
+The publish job has no `needs:`, thus a `v*` tag builds and pushes with no test run. **The operator
+who tags is the gate:** confirm that `ci.yml` is green on the exact commit before the tag goes up. A
+gate in the workflow costs a duplicated job or a `workflow_call` refactor of `ci.yml`, and it buys
+little while one person tags one commit.
+
 ## Both architectures in one manifest
 
 ```yaml

@@ -5,6 +5,7 @@ using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Extensions.Tasks;
 using Xakpc.SQLiteMCPSidecar.Configuration;
 using Xakpc.SQLiteMCPSidecar.Database;
+using Xakpc.SQLiteMCPSidecar.Exceptions;
 using Xakpc.SQLiteMCPSidecar.Mcp;
 using Xakpc.SQLiteMCPSidecar.Security;
 
@@ -128,7 +129,32 @@ var app = builder.Build();
 
 // Checks that need the database file itself. A startup check is much better than a failure at the
 // first request: an orchestrator sees a failed start and an operator sees it immediately.
-await SidecarStartup.RunAsync(app.Services, app.Logger, CancellationToken.None);
+//
+// The catch is what makes "an operator sees it immediately" true. SidecarOptions.Load resolves here,
+// on the first use of the singleton, thus this one block covers each configuration problem and the
+// database check as well. Without it the process ends on an unhandled exception: the operator reads
+// "Unhandled exception." and a stack trace of this product instead of the problem list that the
+// message already holds, and the exit code says the sidecar crashed and not that the deployment is
+// wrong. The list is logged at Critical and the process ends with 1.
+//
+// Only SidecarConfigurationException is caught. Any other exception is a defect of this product and
+// it must keep its stack trace, exactly as ArgumentBindingFilter catches only JsonException.
+try
+{
+    await SidecarStartup.RunAsync(app.Services, app.Logger, CancellationToken.None);
+}
+catch (SidecarConfigurationException exception)
+{
+    app.Logger.LogCritical("The sidecar cannot start. {Problems}", exception.Message);
+
+    // The dispose is load-bearing and it is not tidiness. AddJsonConsole writes from a background
+    // queue, thus a process that returns here can end before the queue drains and the operator gets
+    // an exit code and no message at all. Disposing the host disposes the logger provider, which
+    // flushes. This was observed: the same build printed the problem list for one failure and nothing
+    // for another.
+    await app.DisposeAsync();
+    return 1;
+}
 
 // Before authentication on purpose. See the registration above.
 app.UseRateLimiter();
@@ -144,6 +170,10 @@ app.MapMcp(SidecarEndpoints.Mcp)
     .RequireRateLimiting(SidecarEndpoints.McpRateLimitPolicy);
 
 app.Run();
+
+// The startup block above returns 1, thus the entry point returns an exit code and every path needs
+// one. This is the normal end of the process.
+return 0;
 
 /// <summary>
 /// Declared so that <c>WebApplicationFactory&lt;Program&gt;</c> in the test project finds the entry

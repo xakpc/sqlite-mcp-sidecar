@@ -115,6 +115,36 @@ operator repairs one deployment and not one variable.
 The database file must exist. The sidecar never creates it: creation hides a wrong path and makes
 an empty database next to the correct one.
 
+## How a startup failure reaches the operator
+
+`Program.cs` catches `SidecarConfigurationException` around the `SidecarStartup.RunAsync` call, logs
+the problem list at `Critical`, and returns exit code 1. The catch covers the configuration problems
+as well, because the `SidecarOptions` singleton resolves inside that call.
+
+```text
+Critical: The sidecar cannot start. The sidecar configuration is not valid:
+  - SQLITE_SIDECAR_DB is '/data/notadb.db' and SQLite cannot read it: SQLite Error 26: 'file is
+    not a database'. Check that the path holds a SQLite database, that this process may read it,
+    and that the directory is writable, which a WAL database needs even for a read.
+```
+
+Three rules hold this together:
+
+- **A SQLite failure of the startup check becomes a configuration problem.**
+  `SidecarStartup.ReadJournalModeOrFailAsync` catches `SqliteException` and carries the SQLite
+  message into the problem list with the path. `SidecarOptions.Load` proves that the path exists and
+  it can prove no more: the content of the file, the read permission of this process and the lock
+  support of the filesystem are all invisible to it.
+- **`await app.DisposeAsync()` runs before the return, and it is load-bearing.** `AddJsonConsole`
+  writes from a background queue. Without the dispose the process can end before the queue drains,
+  and the operator gets an exit code and **no message**. This was measured: one build printed the
+  list for an absent token and printed nothing for a file that is not a database.
+- **Only `SidecarConfigurationException` is caught.** Any other exception is a defect of this
+  product and it keeps its stack trace. This is the same rule that `ArgumentBindingFilter` follows
+  with `JsonException`. See [../mcp/error-model.md](../mcp/error-model.md).
+
+`StartupTests.ADatabasePathThatIsNotADatabaseFailsAsAConfigurationProblem` pins the translation.
+
 The writable test of the backup directory is a probe file. A permission bit check is not portable.
 
 ## Journal mode warning

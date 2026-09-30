@@ -1,4 +1,6 @@
+using Microsoft.Data.Sqlite;
 using Xakpc.SQLiteMCPSidecar.Database;
+using Xakpc.SQLiteMCPSidecar.Exceptions;
 using Xakpc.SQLiteMCPSidecar.Security;
 
 namespace Xakpc.SQLiteMCPSidecar.Configuration;
@@ -15,7 +17,8 @@ public static class SidecarStartup
         var database = services.GetRequiredService<SqliteService>();
 
         // Proves that the file is a readable SQLite database before the first request arrives.
-        var journalMode = await database.ReadJournalModeAsync(cancellationToken).ConfigureAwait(false);
+        var journalMode = await ReadJournalModeOrFailAsync(database, options, cancellationToken)
+            .ConfigureAwait(false);
 
         var canWrite = options.Permissions.Has(Permission.Write) || options.Permissions.Has(Permission.DangerRawWrite);
         if (canWrite && !string.Equals(journalMode, "wal", StringComparison.OrdinalIgnoreCase))
@@ -40,6 +43,45 @@ public static class SidecarStartup
         logger.LogInformation(
             "Sidecar ready. permissions={Permissions} maxConcurrency={MaxConcurrency}",
             options.Permissions.ToString(), options.MaxConcurrency);
+    }
+
+    /// <summary>
+    /// Reads the journal mode, and reports a SQLite failure as a configuration problem.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The database file is the one thing that <see cref="SidecarOptions.Load"/> cannot prove. It
+    /// checks that the path exists; it cannot check that the path holds a SQLite database, that this
+    /// process may read it, or that the filesystem under it carries the locks that SQLite needs. A
+    /// bind mount of a Windows folder and a network share both fail that last one.
+    /// </para>
+    /// <para>
+    /// <b>Every startup failure must read as a deployment problem.</b> A <see cref="SqliteException"/>
+    /// here would leave the process with an unhandled exception, thus the operator gets
+    /// <c>Unhandled exception. Microsoft.Data.Sqlite.SqliteException ...</c> and a stack trace of this
+    /// product, and an orchestrator gets an exit code that means a crash. The message SQLite gives is
+    /// the useful half, thus it is carried into the problem list that every other startup check uses.
+    /// </para>
+    /// </remarks>
+    private static async Task<string> ReadJournalModeOrFailAsync(
+        SqliteService database, SidecarOptions options, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await database.ReadJournalModeAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException exception)
+        {
+            // The path is an operator value and this message never leaves the process, thus it names
+            // the path. The disclosure rules bind what a remote caller reads, not a startup log.
+            throw new SidecarConfigurationException(
+            [
+                $"SQLITE_SIDECAR_DB is '{options.DatabasePath}' and SQLite cannot read it: "
+                + exception.Message
+                + " Check that the path holds a SQLite database, that this process may read it, and "
+                + "that the directory is writable, which a WAL database needs even for a read.",
+            ]);
+        }
     }
 
     /// <summary>

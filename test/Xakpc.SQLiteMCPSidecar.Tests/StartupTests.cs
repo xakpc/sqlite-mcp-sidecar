@@ -1,5 +1,8 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xakpc.SQLiteMCPSidecar.Configuration;
+using Xakpc.SQLiteMCPSidecar.Database;
 using Xakpc.SQLiteMCPSidecar.Exceptions;
 using Xakpc.SQLiteMCPSidecar.Security;
 using Xakpc.SQLiteMCPSidecar.Tests.Fixtures;
@@ -113,6 +116,54 @@ public sealed class StartupTests
         Assert.True(options.Permissions.Has(Permission.Read));
         Assert.False(options.Permissions.Has(Permission.Write));
         Assert.False(options.Permissions.Has(Permission.DangerRawWrite));
+    }
+
+    /// <summary>
+    /// A path that exists and is not a SQLite database fails as a configuration problem.
+    /// </summary>
+    /// <remarks>
+    /// <c>SidecarOptions.Load</c> proves that the path exists and it cannot prove more: the content of
+    /// the file, the read permission of this process and the lock support of the filesystem under it
+    /// are all invisible to it. The failure must still read as a deployment problem, because the raw
+    /// <c>SqliteException</c> reached the operator as <c>Unhandled exception.</c> and a stack trace of
+    /// this product, which names no path and gives no repair.
+    /// </remarks>
+    [Fact]
+    public async Task ADatabasePathThatIsNotADatabaseFailsAsAConfigurationProblem()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"not-a-database-{Guid.NewGuid():N}.db");
+        await File.WriteAllTextAsync(path, "this is not a SQLite database", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var options = Load(new Dictionary<string, string?>
+            {
+                ["DB"] = path,
+                ["TOKEN"] = "t",
+                ["PERMISSIONS"] = "schema,read",
+            });
+
+            var services = new ServiceCollection()
+                .AddSingleton(options)
+                .AddSingleton<SqliteService>()
+                .BuildServiceProvider();
+
+            var exception = await Assert.ThrowsAsync<SidecarConfigurationException>(() =>
+                SidecarStartup.RunAsync(services, NullLogger.Instance, TestContext.Current.CancellationToken));
+
+            // The operator has to be able to find the file that the message is about.
+            Assert.Contains(path, exception.Message, StringComparison.Ordinal);
+
+            // The cause that SQLite reported is the useful half and it survives the translation.
+            Assert.Contains("not a database", exception.Message, StringComparison.OrdinalIgnoreCase);
+
+            // One problem list, the same shape as every other startup failure.
+            Assert.Single(exception.Problems);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]

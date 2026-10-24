@@ -14,7 +14,7 @@ flowchart TD
     root --> cfg[configuration/]
     root --> sec[security/ — summary, model, threat-model, authentication, permissions,
                   public-endpoint, write-controls]
-    root --> dep[deployment/ — summary, container, platforms, distribution]
+    root --> dep[deployment/ — summary, container, platforms, distribution, registry]
     root --> dbd[database/]
     root --> mcpd[mcp/]
     root --> tst[testing/ — e2e-harness, live-database-suite, bad-agent-suite]
@@ -126,6 +126,7 @@ trade-off.
 | [deployment/container.md](deployment/container.md) | The repository-root build context, cross-compilation, the final stage, hardening, filesystem access, `compose.yaml`, the container launch profile. |
 | [deployment/platforms.md](deployment/platforms.md) | The path contract, then Kamal, Coolify, a plain VPS with systemd and Fly.io. The client header and token rotation. |
 | [deployment/distribution.md](deployment/distribution.md) | GHCR and why not Docker Hub, the trigger and tag scheme, the released version, the absent test gate, both architectures, provenance. |
+| [deployment/registry.md](deployment/registry.md) | The official MCP Registry entry: `server.json`, the ownership label, the package entry, the publish order. |
 
 ## tmp/
 
@@ -150,5 +151,5 @@ documents go here.
 | Touch a write path | `database/structured-writes.md`, `database/raw-writes.md`, `security/write-controls.md`, `decisions/0004-maxrows-bounds-total-changes.md` |
 | Write documentation | `security/model.md`, `security/threat-model.md`, `security/permissions.md`, and then `README.md` and `SECURITY.md`, which are copies |
 | Touch the container or the launch configuration | `deployment/container.md`, `testing/e2e-harness.md` |
-| Publish or deploy the image | `deployment/distribution.md`, `deployment/platforms.md` |
+| Publish or deploy the image | `deployment/distribution.md`, `deployment/registry.md`, `deployment/platforms.md` |
 | Consider a new feature | `plans/out-of-scope.md`, `decisions/` |

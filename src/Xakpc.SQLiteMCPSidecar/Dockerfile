@@ -35,6 +35,10 @@ RUN dotnet publish src/Xakpc.SQLiteMCPSidecar/Xakpc.SQLiteMCPSidecar.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
+# The official MCP Registry proves ownership of an OCI package with this label. The value must equal
+# "name" in server.json at the repository root.
+LABEL io.modelcontextprotocol.server.name="io.github.xakpc/sqlite-mcp-sidecar"
+
 # One port. The reverse proxy terminates TLS, thus the sidecar serves plain HTTP and it has no
 # HTTPS redirection and no second port.
 EXPOSE 8080

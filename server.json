@@ -1,0 +1,95 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.xakpc/sqlite-mcp-sidecar",
+  "title": "SQLite MCP Sidecar",
+  "description": "Agent-safe MCP sidecar for one live SQLite database: read-only default, bounded writes.",
+  "repository": {
+    "url": "https://github.com/xakpc/sqlite-mcp-sidecar",
+    "source": "github"
+  },
+  "version": "0.1.2",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/xakpc/sqlite-mcp-sidecar:0.1.2",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:8080/db/mcp",
+        "headers": [
+          {
+            "name": "Authorization",
+            "description": "Bearer token: the value of SQLITE_SIDECAR_TOKEN",
+            "value": "Bearer {token}",
+            "isRequired": true,
+            "isSecret": true,
+            "variables": {
+              "token": {
+                "description": "The deployment token (SQLITE_SIDECAR_TOKEN)",
+                "isRequired": true,
+                "isSecret": true
+              }
+            }
+          }
+        ]
+      },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "-p",
+          "value": "127.0.0.1:8080:8080",
+          "description": "Publish the port on loopback only"
+        },
+        {
+          "type": "named",
+          "name": "-v",
+          "value": "{data_dir}:/data",
+          "description": "Mount the directory that holds the existing database (must be writable)",
+          "isRequired": true,
+          "variables": {
+            "data_dir": {
+              "description": "Host directory that contains the SQLite file",
+              "format": "filepath",
+              "isRequired": true
+            }
+          }
+        },
+        {
+          "type": "named",
+          "name": "--read-only",
+          "description": "Read-only root filesystem"
+        },
+        {
+          "type": "named",
+          "name": "--tmpfs",
+          "value": "/tmp",
+          "description": "Scratch space for SQLite"
+        },
+        {
+          "type": "named",
+          "name": "--cap-drop",
+          "value": "ALL",
+          "description": "Drop all Linux capabilities"
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "SQLITE_SIDECAR_DB",
+          "description": "Path of the existing SQLite file inside the container",
+          "default": "/data/app.db",
+          "isRequired": true
+        },
+        {
+          "name": "SQLITE_SIDECAR_TOKEN",
+          "description": "Deployment bearer token (a long random string)",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "SQLITE_SIDECAR_PERMISSIONS",
+          "description": "Permission set: schema, read, write, backup, diagnostics, danger-raw-write",
+          "default": "schema,read"
+        }
+      ]
+    }
+  ]
+}

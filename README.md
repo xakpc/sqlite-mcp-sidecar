@@ -41,6 +41,9 @@ Handing the agent a SQL connection gives it the whole file and one `DELETE` with
 is unrecoverable. `sqlite-sidecar-mcp` sits next to that application as one more SQLite client and
 speaks MCP over HTTP. The owning application does not change.
 
+It runs in production next to the [MCP Canary](https://mcpcanary.com) API, where it gives the
+operator's coding agent read-only access to the live database.
+
 ```mermaid
 flowchart TD
     agent[AI / MCP client] -->|HTTPS| proxy[Reverse proxy]

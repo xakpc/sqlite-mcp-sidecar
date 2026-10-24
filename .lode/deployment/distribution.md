@@ -38,12 +38,13 @@ ref.
 
 ## The released version
 
-`v0.1.1` is the current released tag. `v0.1.0` was the first and it carries the whole MVP; `v0.1.1`
-adds nothing to the product and repairs how a startup failure reads. See
+`v0.1.2` is the current released tag. `v0.1.0` was the first and it carries the whole MVP; `v0.1.1`
+repairs how a startup failure reads; `v0.1.2` adds only the MCP Registry label (see
+[registry.md](registry.md)). See
 [../configuration/options.md](../configuration/options.md).
 
-The registry holds `0.1.1` and `latest` on one digest, and `0.1.0` on its own, thus the first release
-stays pullable. `0.1` and `0` follow the newest tag. Every manifest is multi-architecture and the
+The registry holds `0.1.2` and `latest` on one digest, and `0.1.1` and `0.1.0` on their own, thus
+older releases stay pullable. `0.1` and `0` follow the newest tag. Every manifest is multi-architecture and the
 package is public, thus an anonymous `docker pull` succeeds. Each pull command in `README.md` names
 `latest`, thus the README is only correct while a `v*` tag exists.
 

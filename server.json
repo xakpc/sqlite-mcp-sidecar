@@ -3,6 +3,7 @@
   "name": "dev.xakpc/sqlite-mcp-sidecar",
   "title": "SQLite MCP Sidecar",
   "description": "Agent-safe MCP sidecar for one live SQLite database: read-only default, bounded writes.",
+  "websiteUrl": "https://xakpc.dev",
   "repository": {
     "url": "https://github.com/xakpc/sqlite-mcp-sidecar",
     "source": "github"

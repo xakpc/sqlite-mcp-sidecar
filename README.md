@@ -594,7 +594,7 @@ Apache-2.0. See [`LICENSE`](LICENSE).
 
 ## Contact
 
-Pavel Osadchuk — [github.com/xakpc](https://github.com/xakpc)
+Pavel Osadchuk — [xakpc.dev](https://xakpc.dev) · [github.com/xakpc](https://github.com/xakpc)
 
 Project: [github.com/xakpc/sqlite-mcp-sidecar](https://github.com/xakpc/sqlite-mcp-sidecar)
 

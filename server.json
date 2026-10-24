@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.xakpc/sqlite-mcp-sidecar",
+  "name": "dev.xakpc/sqlite-mcp-sidecar",
   "title": "SQLite MCP Sidecar",
   "description": "Agent-safe MCP sidecar for one live SQLite database: read-only default, bounded writes.",
   "repository": {
     "url": "https://github.com/xakpc/sqlite-mcp-sidecar",
     "source": "github"
   },
-  "version": "0.1.2",
+  "version": "0.1.3",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/xakpc/sqlite-mcp-sidecar:0.1.2",
+      "identifier": "ghcr.io/xakpc/sqlite-mcp-sidecar:0.1.3",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:8080/db/mcp",

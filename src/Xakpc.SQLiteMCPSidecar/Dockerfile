@@ -37,7 +37,7 @@ WORKDIR /app
 
 # The official MCP Registry proves ownership of an OCI package with this label. The value must equal
 # "name" in server.json at the repository root.
-LABEL io.modelcontextprotocol.server.name="io.github.xakpc/sqlite-mcp-sidecar"
+LABEL io.modelcontextprotocol.server.name="dev.xakpc/sqlite-mcp-sidecar"
 
 # One port. The reverse proxy terminates TLS, thus the sidecar serves plain HTTP and it has no
 # HTTPS redirection and no second port.

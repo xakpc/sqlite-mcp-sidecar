@@ -79,6 +79,8 @@ two mandatory values and the permission set with its read-only default.
   the old name `io.github.xakpc/sqlite-mcp-sidecar` and was never published. The first listed
   version is `0.1.3`.
 - The label value is part of the image. A change of the registry name needs a new release.
+- The registry token from `mcp-publisher login` expires after a few minutes. Log in immediately
+  before `publish`, after the release finished, not before the release starts.
 
 ## Related
 
